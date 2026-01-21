@@ -89,7 +89,7 @@ def ask_gemini(user_msg):
     """
 
     # ใช้ URL ของ Gemini 1.5 Flash (มาตรฐานใหม่)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{
