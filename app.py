@@ -24,6 +24,11 @@ SCOPES = [
 ]
 SERVICE_ACCOUNT_FILE = "credentials.json"
 
+# ================== 🧠 MEMORY STORAGE (ความจำ) ==================
+# ตัวแปรนี้จะเก็บประวัติการคุยของลูกค้าแต่ละคน
+# รูปแบบ: { "facebook_id_123": ["ลูกค้า: ดีครับ", "มอส: สวัสดีครับ", ...] }
+chat_history = {}
+
 # ================== GOOGLE SERVICE HELPER ==================
 def get_google_service(service_name, version):
     try:
@@ -38,7 +43,7 @@ def get_google_service(service_name, version):
 
 # ================== READ BRAIN (Sheets) ==================
 def get_ai_instruction():
-    default_instruction = "Role: Mos Wedding Admin. Task: Answer politely."
+    default_instruction = "Role: Mos Wedding Admin."
     if not SPREADSHEET_ID: return default_instruction
     service = get_google_service("sheets", "v4")
     if not service: return default_instruction
@@ -84,14 +89,20 @@ def get_packages():
     except Exception: return "ไม่พบข้อมูลแพ็กเกจ"
 
 # ================== GEMINI AI (THE BRAIN) ==================
-def ask_gemini(user_msg):
+def ask_gemini(user_msg, sender_id):
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash") # ใช้รุ่นล่าสุดที่คุณมี
+        model = genai.GenerativeModel(model_name="gemini-2.5-flash") # ใช้รุ่น 2.5 ตามที่คุณมี
 
         calendar_info = check_calendar()
         packages_info = get_packages()
         custom_instruction = get_ai_instruction()
+
+        # 1. ดึงประวัติเก่าของคนนี้มา (ถ้ามี)
+        user_history = chat_history.get(sender_id, [])
+        
+        # แปลงเป็นข้อความเดียวเพื่อให้ AI อ่าน
+        history_text = "\n".join(user_history)
 
         final_prompt = f"""
 {custom_instruction}
@@ -100,11 +111,33 @@ def ask_gemini(user_msg):
 ตารางงาน: {calendar_info}
 แพ็กเกจ: {packages_info}
 
-[ข้อความลูกค้า]
+[ประวัติการสนทนาก่อนหน้า] (สำคัญมาก! ให้อ่านบริบทจากตรงนี้ด้วย)
+{history_text}
+
+[ข้อความล่าสุดจากลูกค้า]
 "{user_msg}"
 """
         response = model.generate_content(final_prompt)
-        return response.text.strip()
+        full_reply = response.text.strip()
+
+        # 2. บันทึกบทสนทนาใหม่ลงความจำ
+        # (เก็บแค่ส่วน "ตอบลูกค้า" ไม่เอาส่วนวิเคราะห์ เพื่อไม่ให้ AI งงตัวเอง)
+        parts = full_reply.split("###")
+        clean_reply = parts[1].strip() if len(parts) >= 2 else full_reply
+        
+        # เก็บแบบ: "User: ข้อความ" และ "Bot: ข้อความ"
+        if sender_id not in chat_history:
+            chat_history[sender_id] = []
+        
+        chat_history[sender_id].append(f"Customer: {user_msg}")
+        chat_history[sender_id].append(f"Mos: {clean_reply}")
+
+        # จำกัดความจำไว้แค่ 20 ประโยคล่าสุด (กันยาวเกิน)
+        if len(chat_history[sender_id]) > 20:
+            chat_history[sender_id] = chat_history[sender_id][-20:]
+
+        return full_reply
+
     except Exception as e:
         return f"System Error ### ขออภัยครับ ระบบขัดข้อง ({str(e)})"
 
@@ -123,36 +156,28 @@ def webhook():
             for event in entry.get("messaging", []):
                 if "message" in event and "text" in event["message"]:
                     user_msg = event["message"]["text"]
+                    sender_id = event["sender"]["id"] # ดึง ID ลูกค้ามาใช้เป็นกุญแจความจำ
                     
-                    # 1. ให้ AI คิด
-                    full_response = ask_gemini(user_msg)
+                    # 1. ให้ AI คิด (ส่ง sender_id ไปด้วย)
+                    full_response = ask_gemini(user_msg, sender_id)
                     
-                    # 2. แยกส่วน (วิเคราะห์ vs ตอบจริง) ด้วยเครื่องหมาย ###
+                    # 2. แยกส่วน
                     parts = full_response.split("###")
                     
                     if len(parts) >= 2:
-                        analysis_part = parts[0].strip() # ส่วนวิเคราะห์
-                        reply_part = parts[1].strip()    # ส่วนตอบลูกค้า
+                        analysis_part = parts[0].strip()
+                        reply_part = parts[1].strip()
                     else:
                         analysis_part = "AI ไม่ได้วิเคราะห์แยกส่วนมาให้"
                         reply_part = full_response.strip()
 
-                    # 3. ส่งเข้า Telegram (แยก 2 ข้อความเพื่อความง่าย)
-                    
-                    # ข้อความที่ 1: ส่งบทวิเคราะห์ (ไว้อ่าน)
+                    # 3. ส่งเข้า Telegram (แยก 2 ข้อความ)
                     send_telegram(
                         f"🔔 ลูกค้า: {user_msg}\n"
                         f"--------------------\n"
                         f"🧠 AI วิเคราะห์:\n{analysis_part}"
                     )
-
-                    # ข้อความที่ 2: ส่งคำตอบเพียวๆ (ไว้ก๊อปปี้)
-                    # ส่งไปแต่ข้อความเปล่าๆ เลย จะได้กด Copy ทั้งข้อความได้ทันที
                     send_telegram(reply_part)
-                    
-                    # 4. (ถ้าจะให้บอทตอบลูกค้าเลย ให้เปิดบรรทัดล่างนี้)
-                    # send_facebook_message(sender_id, reply_part) 
-                    # *แต่ตอนนี้เราเน้นให้แอดมินดูก่อน บรรทัดนี้อาจจะยังไม่ต้องทำ ถ้าคุณใช้ระบบตอบอัตโนมัติของ Facebook อยู่แล้ว*
                     
         return "OK", 200
 
