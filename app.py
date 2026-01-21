@@ -132,8 +132,8 @@ def ask_gemini(user_msg):
         genai.configure(api_key=GEMINI_API_KEY)
 
         model = genai.GenerativeModel(
-            model_name="models/gemini-2.0-flash"
-        )
+    model_name="gemini-1.5-flash"
+)
 
         calendar_info = check_calendar()
         packages_info = get_packages()
