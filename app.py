@@ -70,7 +70,7 @@ def get_packages():
     except Exception as e:
         return "ไม่พบข้อมูลแพ็กเกจ (ตรวจสอบชื่อ Tab ใน Sheet)"
 
-# --- 3. FUNCTION: AI Think (Direct API - ไม้ตายแก้ปัญหา Version) ---
+# --- 3. FUNCTION: AI Think (Direct API - Gemini 1.5 Flash) ---
 def ask_gemini(user_msg):
     # ดึงข้อมูลประกอบ
     calendar_info = check_calendar()
@@ -88,8 +88,8 @@ def ask_gemini(user_msg):
     User Message: "{user_msg}"
     """
 
-    # ยิงตรงไปหา Google (ไม่ต้องง้อ Library)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    # ใช้ URL ของ Gemini 1.5 Flash (มาตรฐานใหม่)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{
