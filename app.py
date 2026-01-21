@@ -3,46 +3,60 @@ import datetime
 import requests
 from flask import Flask, request
 
-# Google
+# ================== GOOGLE ==================
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# Gemini SDK (วิธีที่ถูกต้อง)
+# ================== GEMINI ==================
 import google.generativeai as genai
 
+# ================== FLASK ==================
 app = Flask(__name__)
 
-# ================== CONFIG ==================
+# ======================================================
+# ENV CONFIG
+# ======================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "moswedding1234")
+FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
+
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 
-# Google Service Account
+SERVICE_ACCOUNT_FILE = "credentials.json"
+
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly"
 ]
-SERVICE_ACCOUNT_FILE = "credentials.json"
 
-# ================== GOOGLE SERVICE ==================
+# ======================================================
+# GOOGLE SERVICE
+# ======================================================
 def get_google_service(service_name, version):
     try:
         if not os.path.exists(SERVICE_ACCOUNT_FILE):
+            print("❌ credentials.json not found")
             return None
 
         creds = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE,
             scopes=SCOPES
         )
+
         return build(service_name, version, credentials=creds)
 
     except Exception as e:
-        print("Google service error:", e)
+        print("Google Service Error:", e)
         return None
 
-# ================== CALENDAR ==================
+
+# ======================================================
+# GOOGLE CALENDAR
+# ======================================================
 def check_calendar():
     service = get_google_service("calendar", "v3")
     if not service:
@@ -50,6 +64,7 @@ def check_calendar():
 
     try:
         now = datetime.datetime.utcnow().isoformat() + "Z"
+
         events = service.events().list(
             calendarId="primary",
             timeMin=now,
@@ -59,74 +74,89 @@ def check_calendar():
         ).execute().get("items", [])
 
         if not events:
-            return "ว่างครับ (ยังไม่มีงานเร็ว ๆ นี้)"
+            return "📅 ยังไม่มีงานในช่วงนี้"
 
         text = ""
         for e in events:
             start = e["start"].get("dateTime", e["start"].get("date"))
-            text += f"- {start}: {e.get('summary','(ไม่มีชื่อ)')}\n"
+            text += f"- {start} : {e.get('summary','(ไม่มีชื่อ)')}\n"
 
         return text
 
     except Exception as e:
         return f"Calendar error: {e}"
 
-# ================== PACKAGES (SHEETS) ==================
+
+# ======================================================
+# GOOGLE SHEETS
+# ======================================================
 def get_packages():
     if not SPREADSHEET_ID:
         return "ยังไม่ได้ตั้งค่าแพ็กเกจ"
 
     service = get_google_service("sheets", "v4")
     if not service:
-        return "ไม่สามารถดึงแพ็กเกจได้"
+        return "ไม่สามารถเชื่อม Google Sheets ได้"
 
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range="Services!A2:C20"
+            range="Services!A2:C50"
         ).execute()
 
         rows = result.get("values", [])
+
         if not rows:
             return "ไม่พบข้อมูลแพ็กเกจ"
 
         text = ""
         for r in rows:
             if len(r) >= 2:
-                text += f"- {r[0]}: {r[1]}\n"
+                service_name = r[0]
+                price = r[1]
+                desc = r[2] if len(r) > 2 else ""
+                text += f"• {service_name}\n  ราคา: {price}\n  {desc}\n\n"
 
-        return text
+        return text.strip()
 
     except Exception as e:
         return f"Sheets error: {e}"
 
-# ================== GEMINI ==================
+
+# ======================================================
+# GEMINI AI
+# ======================================================
 def ask_gemini(user_msg):
+
     try:
         genai.configure(api_key=GEMINI_API_KEY)
 
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash"
+            model_name="models/gemini-2.0-flash"
         )
 
         calendar_info = check_calendar()
         packages_info = get_packages()
 
         prompt = f"""
-คุณคือแอดมินของ "Mos Wedding พิษณุโลก"
-รับจัดงานแต่งและอีเวนต์
+คุณคือแอดมินเพจ "Mos Wedding พิษณุโลก"
+รับจัดงานแต่ง งานบวช งานอีเวนต์
 
-ข้อมูลปัจจุบัน:
-ตารางงานทีม:
+ข้อมูลปัจจุบัน
+
+📅 ตารางงาน:
 {calendar_info}
 
-แพ็กเกจ:
+💍 แพ็กเกจ:
 {packages_info}
 
-กติกา:
-- ตอบสุภาพ เป็นกันเอง
-- สั้น กระชับ
-- ถ้าลูกค้าทักทาย ให้ชวนคุยต่อ
+กติกาการตอบ:
+- ใช้ภาษาไทย
+- สุภาพ เป็นกันเอง
+- ตอบสั้น กระชับ
+- ถ้าลูกค้าทัก ให้ชวนคุยต่อ
+- ถ้าถามราคา ให้แนะนำแพ็กเกจ
+- ถ้าถามวันว่าง ให้ดูจากตารางงาน
 
 ข้อความลูกค้า:
 {user_msg}
@@ -138,47 +168,87 @@ def ask_gemini(user_msg):
     except Exception as e:
         return f"Gemini Error: {e}"
 
-# ================== TELEGRAM ==================
+
+# ======================================================
+# TELEGRAM NOTIFY
+# ======================================================
 def send_telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text
     }
-    requests.post(url, json=payload, timeout=10)
 
-# ================== WEBHOOK ==================
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except:
+        pass
+
+
+# ======================================================
+# FACEBOOK SEND MESSAGE
+# ======================================================
+def send_fb_message(psid, text):
+    url = f"https://graph.facebook.com/v19.0/me/messages"
+    params = {"access_token": FB_PAGE_TOKEN}
+
+    payload = {
+        "recipient": {"id": psid},
+        "message": {"text": text}
+    }
+
+    requests.post(url, params=params, json=payload, timeout=10)
+
+
+# ======================================================
+# WEBHOOK
+# ======================================================
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
 
-    # Facebook Verify
+    # ---------- Verify ----------
     if request.method == "GET":
         if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN:
             return request.args.get("hub.challenge")
         return "Verification failed", 403
 
-    # Facebook Message
+    # ---------- Message ----------
     data = request.json
     entries = data.get("entry", [])
 
     for entry in entries:
         for event in entry.get("messaging", []):
-            if "message" in event and "text" in event["message"]:
-                user_msg = event["message"]["text"]
 
-                ai_reply = ask_gemini(user_msg)
+            if "message" not in event:
+                continue
 
-                send_telegram(
-                    f"🔔 ลูกค้าใหม่ Mos Wedding\n"
-                    f"💬 ข้อความ: {user_msg}\n\n"
-                    f"🤖 AI ตอบ:\n{ai_reply}"
-                )
+            if "text" not in event["message"]:
+                continue
+
+            user_msg = event["message"]["text"]
+            sender_id = event["sender"]["id"]
+
+            ai_reply = ask_gemini(user_msg)
+
+            # ส่งกลับลูกค้า
+            send_fb_message(sender_id, ai_reply)
+
+            # แจ้งแอดมิน
+            send_telegram(
+                f"🔔 ลูกค้าใหม่ Mos Wedding\n"
+                f"💬 {user_msg}\n\n"
+                f"🤖 AI ตอบ:\n{ai_reply}"
+            )
 
     return "OK", 200
 
-# ================== RUN ==================
+
+# ======================================================
+# RUN
+# ======================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
