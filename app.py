@@ -106,7 +106,7 @@ def ask_gemini(user_msg):
     """
     
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash-001')
         response = model.generate_content(system_prompt)
         return response.text
     except Exception as e:
