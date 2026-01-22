@@ -2,17 +2,18 @@ import os
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# รองรับทั้ง DATABASE_URL และ SUPABASE_DB_URL
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("SUPABASE_DB_URL")
+)
 
 if not DATABASE_URL:
-    raise Exception("DATABASE_URL not set")
+    raise Exception("DATABASE_URL or SUPABASE_DB_URL not set")
 
-# =========================
-# PostgreSQL connection pool
-# =========================
 pool = SimpleConnectionPool(
     minconn=1,
-    maxconn=10,
+    maxconn=5,
     dsn=DATABASE_URL,
     sslmode="require"
 )
@@ -26,9 +27,6 @@ def release_conn(conn):
     pool.putconn(conn)
 
 
-# =========================
-# init database
-# =========================
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
@@ -41,13 +39,9 @@ def init_db():
         phone TEXT,
         intent TEXT,
         last_message TEXT,
+        note TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    """)
-
-    cur.execute("""
-    CREATE INDEX IF NOT EXISTS idx_customers_created
-    ON customers(created_at DESC);
     """)
 
     conn.commit()
