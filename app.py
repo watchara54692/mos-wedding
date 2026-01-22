@@ -1,9 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from db import get_db
+from db import get_conn, release_conn, init_db
 
 app = Flask(__name__)
 CORS(app)
+
+# init database once on startup
+init_db()
 
 
 @app.route("/")
@@ -11,23 +14,23 @@ def home():
     return "MoS Wedding API running"
 
 
-# -------------------------------
-# GET messages (pagination)
-# -------------------------------
-@app.route("/api/messages", methods=["GET"])
-def get_messages():
+# --------------------------------
+# GET customers (pagination)
+# --------------------------------
+@app.route("/api/customers", methods=["GET"])
+def get_customers():
     page = int(request.args.get("page", 1))
     limit = int(request.args.get("limit", 20))
 
     offset = (page - 1) * limit
 
-    conn = get_db()
+    conn = get_conn()
     cur = conn.cursor()
 
     cur.execute(
         """
-        SELECT id, sender, message, created_at
-        FROM messages
+        SELECT id, name, phone, note, created_at
+        FROM customers
         ORDER BY id DESC
         LIMIT %s OFFSET %s
         """,
@@ -35,8 +38,9 @@ def get_messages():
     )
 
     rows = cur.fetchall()
+
     cur.close()
-    conn.close()
+    release_conn(conn)
 
     has_more = len(rows) > limit
     rows = rows[:limit]
@@ -44,9 +48,10 @@ def get_messages():
     data = [
         {
             "id": r[0],
-            "sender": r[1],
-            "message": r[2],
-            "created_at": r[3].isoformat()
+            "name": r[1],
+            "phone": r[2],
+            "note": r[3],
+            "created_at": r[4].isoformat()
         }
         for r in rows
     ]
@@ -59,29 +64,31 @@ def get_messages():
     })
 
 
-# -------------------------------
-# POST new message
-# -------------------------------
-@app.route("/api/messages", methods=["POST"])
-def create_message():
+# --------------------------------
+# POST new customer
+# --------------------------------
+@app.route("/api/customers", methods=["POST"])
+def create_customer():
     payload = request.json
 
-    sender = payload.get("sender")
-    message = payload.get("message")
+    name = payload.get("name")
+    phone = payload.get("phone")
+    note = payload.get("note")
 
-    conn = get_db()
+    conn = get_conn()
     cur = conn.cursor()
 
     cur.execute(
         """
-        INSERT INTO messages (sender, message)
-        VALUES (%s, %s)
+        INSERT INTO customers (name, phone, note)
+        VALUES (%s, %s, %s)
         """,
-        (sender, message)
+        (name, phone, note)
     )
 
     conn.commit()
+
     cur.close()
-    conn.close()
+    release_conn(conn)
 
     return jsonify({"status": "ok"})
