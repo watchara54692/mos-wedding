@@ -4,3 +4,4 @@ google-generativeai
 openai
 pandas
 gunicorn
+psycopg2-binary
