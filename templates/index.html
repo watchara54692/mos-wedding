@@ -2,143 +2,215 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>มอสเวดดิ้ง CRM</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>มอสเวดดิ้ง CRM 📊</title>
     <style>
-        :root { --messenger-blue: #0084ff; --ai-gold: #fff9e6; --tag-blue: #e7f3ff; }
-        body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100dvh; overflow: hidden; }
-        .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; background: #fff; }
-        .contact-item { padding: 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 12px; }
-        .contact-item:hover { background: #f5f6f7; }
-        .avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: #eee; flex-shrink: 0; }
+        :root { --messenger-blue: #0084ff; --bg-gray: #f0f2f5; --ai-gold: #fff9e6; --tag-blue: #e7f3ff; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: #fff; height: 100dvh; display: flex; overflow: hidden; }
         
-        /* สไตล์ Tag ใน Inbox */
-        .inbox-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-        .mini-tag { font-size: 10px; padding: 2px 6px; border-radius: 8px; background: var(--tag-blue); color: var(--messenger-blue); font-weight: bold; white-space: nowrap; }
+        /* Sidebar & Inbox */
+        .sidebar { width: 100%; height: 100%; display: flex; flex-direction: column; border-right: 1px solid #ddd; background: #fff; transition: 0.3s; z-index: 10; }
+        .sidebar-header { padding: 15px; font-weight: bold; font-size: 20px; color: var(--messenger-blue); border-bottom: 1px solid #eee; text-align: center; }
+        .contact-list { flex: 1; overflow-y: auto; }
+        .contact-item { padding: 12px 15px; border-bottom: 1px solid #f9f9f9; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+        .contact-item:hover { background: #f5f6f7; }
+        .avatar { width: 48px; height: 48px; border-radius: 50%; background: #eee; object-fit: cover; flex-shrink: 0; }
+        .contact-info { flex: 1; min-width: 0; }
+        .contact-name { font-weight: 600; font-size: 15px; color: #050505; }
+        .contact-msg { font-size: 13px; color: #65676b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        .chat-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; transform: translateX(100%); transition: 0.3s; display: flex; flex-direction: column; z-index: 20; }
+        /* Inbox Tags (Blue Style) */
+        .inbox-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+        .mini-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--tag-blue); color: var(--messenger-blue); font-weight: bold; white-space: nowrap; }
+
+        /* Chat View (Messenger Style) */
+        .chat-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; display: flex; flex-direction: column; transform: translateX(100%); transition: 0.3s; z-index: 20; }
         .chat-view.active { transform: translateX(0); }
-        .chat-header { padding: 10px; border-bottom: 1px solid #eee; background: #fff; }
-        .status-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #f0f2f5; margin-right: 5px; font-weight: bold; }
-        .chat-container { flex: 1; padding: 15px; overflow-y: auto; background: #fff; display: flex; flex-direction: column; gap: 8px; }
-        .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; word-wrap: break-word; }
-        .user { align-self: flex-start; background: #f0f2f5; }
+        .chat-header { padding: 10px 15px; border-bottom: 1px solid #eee; background: #fff; }
+        .header-main { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .sync-btn { border: 1px solid #ddd; background: #fff; padding: 5px 12px; border-radius: 15px; font-size: 12px; color: #666; cursor: pointer; font-weight: 500; }
+        
+        /* Chat Status AI Tags */
+        .ai-status-bar { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+        .status-tag { padding: 4px 12px; border-radius: 15px; font-size: 12px; font-weight: 600; background: #f0f2f5; color: #606770; border: 1px solid #e4e6eb; }
+        .status-tag.active { background: #e7f3ff; color: var(--messenger-blue); border-color: var(--messenger-blue); }
+
+        .chat-container { flex: 1; padding: 15px; background: #fff; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+        .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; line-height: 1.4; word-wrap: break-word; }
+        .user { align-self: flex-start; background: var(--bg-gray); color: #050505; }
         .admin { align-self: flex-end; background: var(--messenger-blue); color: #fff; }
-        .ai-area { background: var(--ai-gold); padding: 12px; border-top: 1px solid #ffeeba; }
-        .input-footer { padding: 10px; border-top: 1px solid #eee; display: flex; gap: 8px; background: #fff; }
-        .msg-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; background: #f0f2f5; font-size: 15px; }
-        .send-btn { border: none; background: none; color: var(--messenger-blue); font-size: 24px; cursor: pointer; }
-        @media (min-width: 768px) { .sidebar { width: 360px; } .chat-view { position: static; transform: none; display: none; width: 100%; } .chat-view.active { display: flex; } }
+
+        /* AI Suggestion Area (Yellow) */
+        .ai-area { background: var(--ai-gold); border-top: 1px solid #ffeeba; padding: 15px; }
+        .ai-label { font-weight: bold; color: #856404; font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+        .ai-analysis { font-size: 13px; color: #666; font-style: italic; margin-bottom: 10px; line-height: 1.4; border-bottom: 1px dashed #d1c191; padding-bottom: 10px; }
+        .ai-reply { font-size: 15px; color: #333; font-weight: 500; margin-bottom: 12px; }
+        .use-btn { width: 100%; background: #fff; border: 1.5px solid #856404; color: #856404; padding: 10px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .use-btn:active { background: #fdf0c2; }
+
+        /* Footer Input */
+        .footer { padding: 10px; border-top: 1px solid #eee; display: flex; align-items: center; gap: 10px; background: #fff; padding-bottom: env(safe-area-inset-bottom); }
+        .msg-input { flex: 1; padding: 12px 18px; border: 1px solid #ddd; border-radius: 25px; outline: none; font-size: 15px; background: var(--bg-gray); }
+        .send-btn { color: var(--messenger-blue); border: none; background: none; font-size: 28px; cursor: pointer; padding: 0; }
+
+        @media (min-width: 768px) {
+            .sidebar { width: 360px; }
+            .chat-view { position: static; transform: none; display: none; width: 100%; }
+            .chat-view.active { display: flex; }
+        }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <div style="padding:15px; font-weight:bold; font-size:18px; color:var(--messenger-blue); border-bottom:1px solid #eee;">มอสเวดดิ้ง CRM 📊</div>
-        <div id="contactList"></div>
+        <div class="sidebar-header">มอสเวดดิ้ง CRM 📊</div>
+        <div class="contact-list" id="contactList"></div>
     </div>
 
     <div class="chat-view" id="chatView">
         <div class="chat-header">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <button onclick="closeChat()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px;">❮</button>
-                <div id="chatTitle" style="font-weight:bold;"></div>
-                <button onclick="syncHistory()" id="syncBtn" style="border:1px solid #ddd; background:#fff; padding:4px 10px; border-radius:10px; font-size:11px;">🔄 Sync ประวัติ</button>
+            <div class="header-main">
+                <button onclick="closeChat()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px; cursor:pointer;">❮</button>
+                <div id="chatTitle" style="font-weight:bold; font-size:16px;">เลือกแชทเพื่อเริ่มคุย</div>
+                <button onclick="syncHistoryNow()" id="syncBtn" class="sync-btn">🔄 Sync ประวัติ</button>
             </div>
-            <div id="aiStatusBar" style="display:flex; justify-content:center; flex-wrap:wrap; gap:5px;">
-                <span class="status-tag" id="typeTag">📍 -</span>
-                <span class="status-tag" id="budgetTag">💰 -</span>
-                <span class="status-tag" id="chanceTag">🎯 -</span>
+            <div class="ai-status-bar" id="aiStatusBar">
+                <div class="status-tag" id="typeTag">📍 ประเภทงาน: -</div>
+                <div class="status-tag" id="budgetTag">💰 งบประมาณ: -</div>
+                <div class="status-tag" id="chanceTag">🎯 โอกาส: -</div>
             </div>
         </div>
+
         <div class="chat-container" id="chatBox"></div>
+
         <div class="ai-area" id="aiPanel" style="display:none;">
-            <div id="aiAnalysis" style="font-size:12px; color:#666; font-style:italic; border-bottom:1px dashed #ddd; padding-bottom:5px; margin-bottom:8px;"></div>
-            <div id="aiReply" style="font-size:14px; font-weight:500; margin-bottom:10px;"></div>
-            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ดึงคำตอบลงช่องพิมพ์ 👇</button>
+            <div class="ai-label">🤖 AI ผู้เชี่ยวชาญการขายแนะนำ:</div>
+            <div id="aiAnalysis" class="ai-analysis">กำลังวิเคราะห์จิตวิทยาการขาย...</div>
+            <div id="aiReply" class="ai-reply">...</div>
+            <button class="use-btn" onclick="useAi()">ดึงคำตอบลงช่องพิมพ์ 👇</button>
         </div>
-        <div class="input-footer">
+
+        <div class="footer">
             <input type="text" id="msgInput" class="msg-input" placeholder="พิมพ์ข้อความตอบกลับ...">
-            <button onclick="sendMsg()" class="send-btn">➤</button>
+            <button class="send-btn" onclick="sendMsg()">➤</button>
         </div>
     </div>
 
     <script>
         let curSid = null, aiCleanMsg = "";
+        
+        // Polling อัปเดตรายชื่อและข้อความทุก 2-3 วินาที
         setInterval(loadContacts, 3000);
-        setInterval(() => { if(curSid) loadMessages(curSid) }, 2000);
+        setInterval(() => { if(curSid) loadMessages(curSid) }, 2500);
 
-        // แก้ไขเฉพาะฟังก์ชัน loadContacts() เพื่อให้ Tag สีน้ำเงินขึ้นครบใน Inbox
-async function loadContacts() {
-    try {
-        let res = await fetch('/api/contacts');
-        let contacts = await res.json();
-        let html = "";
-        contacts.forEach(c => {
-            let pic = c.profile_pic || 'https://via.placeholder.com/50';
-            // Tag สีน้ำเงิน 3 อย่างใต้ชื่อลูกค้า
-            let tagType = c.ai_tag ? `<span class="mini-tag">📍 ${c.ai_tag}</span>` : "";
-            let tagBudget = (c.ai_budget && c.ai_budget !== 'ไม่ระบุ') ? `<span class="mini-tag">💰 ${c.ai_budget}</span>` : "";
-            let tagChance = (c.ai_chance > 0) ? `<span class="mini-tag">🎯 ${c.ai_chance}%</span>` : "";
+        async function loadContacts() {
+            try {
+                let res = await fetch('/api/contacts');
+                let contacts = await res.json();
+                let html = "";
+                contacts.forEach(c => {
+                    let pic = c.profile_pic ? c.profile_pic : 'https://via.placeholder.com/50';
+                    // สร้าง Tag สีน้ำเงิน 3 อย่างใน Inbox
+                    let tagType = c.ai_tag ? `<span class="mini-tag">📍 ${c.ai_tag}</span>` : "";
+                    let tagBudget = (c.ai_budget && c.ai_budget !== 'ไม่ระบุ') ? `<span class="mini-tag">💰 ${c.ai_budget}</span>` : "";
+                    let tagChance = (c.ai_chance > 0) ? `<span class="mini-tag">🎯 ${c.ai_chance}%</span>` : "";
 
-            html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name || 'ลูกค้า'}')">
-                <img src="${pic}" class="avatar">
-                <div style="flex:1; min-width:0;">
-                    <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.first_name || 'ลูกค้า'}</div>
-                    <div style="font-size:12px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.message}</div>
-                    <div class="inbox-tags">${tagType}${tagBudget}${tagChance}</div>
-                </div>
-            </div>`;
-        });
-        document.getElementById('contactList').innerHTML = html;
-    } catch (e) {}
-}
+                    html += `
+                    <div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name || 'ลูกค้า'}')">
+                        <img src="${pic}" class="avatar" onerror="this.src='https://via.placeholder.com/50'">
+                        <div class="contact-info">
+                            <div class="contact-name">${c.first_name || 'ลูกค้า'}</div>
+                            <div class="contact-msg">${c.message}</div>
+                            <div class="inbox-tags">${tagType}${tagBudget}${tagChance}</div>
+                        </div>
+                    </div>`;
+                });
+                document.getElementById('contactList').innerHTML = html;
+            } catch (e) { console.error("Load Contacts Error:", e); }
+        }
 
-        function openChat(sid, name) { curSid = sid; document.getElementById('chatTitle').innerText = name; document.getElementById('chatView').classList.add('active'); loadMessages(sid); }
-        function closeChat() { curSid = null; document.getElementById('chatView').classList.remove('active'); }
+        function openChat(sid, name) {
+            curSid = sid;
+            document.getElementById('chatTitle').innerText = name;
+            document.getElementById('chatView').classList.add('active');
+            loadMessages(sid);
+        }
+
+        function closeChat() {
+            curSid = null;
+            document.getElementById('chatView').classList.remove('active');
+        }
 
         async function loadMessages(sid) {
             try {
                 let res = await fetch('/api/messages/' + sid);
                 let data = await res.json();
                 let html = "", latestAi = "";
+                
+                // อัปเดตแถบสถานะ AI ด้านบน
                 if(data.length > 0) {
                     let u = data[0];
                     document.getElementById('typeTag').innerText = "📍 " + (u.ai_tag || '-');
                     document.getElementById('budgetTag').innerText = "💰 " + (u.ai_budget || '-');
                     document.getElementById('chanceTag').innerText = "🎯 " + (u.ai_chance || '0') + "%";
                 }
+
                 data.forEach(m => {
                     if(m.sender_type === 'ai_suggestion') latestAi = m.message;
                     else if(m.message) html += `<div class="bubble ${m.sender_type}">${m.message}</div>`;
                 });
+                
                 document.getElementById('chatBox').innerHTML = html;
                 document.getElementById('chatBox').scrollTop = document.getElementById('chatBox').scrollHeight;
+
+                // จัดการกล่อง AI Suggestion
                 if(latestAi) {
                     let p = latestAi.split('###');
                     document.getElementById('aiAnalysis').innerText = p[0].trim();
                     aiCleanMsg = p[1]?.trim() || "";
                     document.getElementById('aiReply').innerText = aiCleanMsg;
                     document.getElementById('aiPanel').style.display = 'block';
-                } else { document.getElementById('aiPanel').style.display = 'none'; }
-            } catch (e) {}
+                } else {
+                    document.getElementById('aiPanel').style.display = 'none';
+                }
+            } catch (e) { console.error("Load Messages Error:", e); }
         }
 
         async function sendMsg() {
-            let m = document.getElementById('msgInput').value.trim(); if(!m || !curSid) return;
+            let m = document.getElementById('msgInput').value.trim();
+            if(!m || !curSid) return;
             document.getElementById('msgInput').value = "";
-            await fetch('/api/send_reply', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sender_id:curSid, message:m})});
-            loadMessages(curSid);
+            try {
+                await fetch('/api/send_reply', {
+                    method:'POST', 
+                    headers:{'Content-Type':'application/json'}, 
+                    body: JSON.stringify({sender_id:curSid, message:m})
+                });
+                loadMessages(curSid);
+            } catch (e) { alert("ส่งไม่สำเร็จ กรุณาลองใหม่"); }
         }
 
-        async function syncHistory() {
+        async function syncHistoryNow() {
             if(!curSid) return;
             let btn = document.getElementById('syncBtn');
             btn.innerText = "⏳ กำลังดึง...";
-            let res = await fetch('/api/sync_history/' + curSid);
-            if(res.ok) { alert("Sync สำเร็จ!"); loadMessages(curSid); }
+            btn.disabled = true;
+            try {
+                let res = await fetch('/api/sync_history/' + curSid);
+                if(res.ok) {
+                    alert("Sync ประวัติย้อนหลังสำเร็จ!");
+                    loadMessages(curSid);
+                } else {
+                    alert("ไม่พบประวัติเพิ่มเติม");
+                }
+            } catch (e) { alert("เกิดข้อผิดพลาดในการ Sync"); }
             btn.innerText = "🔄 Sync ประวัติ";
+            btn.disabled = false;
         }
-        function useAi() { document.getElementById('msgInput').value = aiCleanMsg; document.getElementById('msgInput').focus(); }
+
+        function useAi() {
+            document.getElementById('msgInput').value = aiCleanMsg;
+            document.getElementById('msgInput').focus();
+        }
     </script>
 </body>
 </html>
