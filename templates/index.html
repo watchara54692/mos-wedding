@@ -2,31 +2,38 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Mos Wedding CRM</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>มอสเวดดิ้ง CRM</title>
     <style>
-        :root { --messenger-blue: #0084ff; --bg-gray: #f0f2f5; --ai-gold: #fff9e6; }
+        :root { --messenger-blue: #0084ff; --ai-gold: #fff9e6; --tag-blue: #e7f3ff; }
         body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100dvh; overflow: hidden; }
-        .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
-        .contact-item { padding: 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+        .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; background: #fff; }
+        .contact-item { padding: 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+        .contact-item:hover { background: #f5f6f7; }
+        .avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: #eee; flex-shrink: 0; }
+        
+        /* สไตล์ Tag ใน Inbox */
+        .inbox-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+        .mini-tag { font-size: 10px; padding: 2px 6px; border-radius: 8px; background: var(--tag-blue); color: var(--messenger-blue); font-weight: bold; white-space: nowrap; }
+
         .chat-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; transform: translateX(100%); transition: 0.3s; display: flex; flex-direction: column; z-index: 20; }
         .chat-view.active { transform: translateX(0); }
-        .chat-header { padding: 10px; border-bottom: 1px solid #eee; }
+        .chat-header { padding: 10px; border-bottom: 1px solid #eee; background: #fff; }
         .status-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #f0f2f5; margin-right: 5px; font-weight: bold; }
         .chat-container { flex: 1; padding: 15px; overflow-y: auto; background: #fff; display: flex; flex-direction: column; gap: 8px; }
-        .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; }
+        .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; word-wrap: break-word; }
         .user { align-self: flex-start; background: #f0f2f5; }
         .admin { align-self: flex-end; background: var(--messenger-blue); color: #fff; }
         .ai-area { background: var(--ai-gold); padding: 12px; border-top: 1px solid #ffeeba; }
-        .input-footer { padding: 10px; border-top: 1px solid #eee; display: flex; gap: 8px; }
-        .msg-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; background: #f0f2f5; }
-        .inbox-tag { display: inline-block; margin-top: 4px; padding: 2px 8px; background: #e7f3ff; color: var(--messenger-blue); border-radius: 10px; font-size: 10px; font-weight: bold; }
+        .input-footer { padding: 10px; border-top: 1px solid #eee; display: flex; gap: 8px; background: #fff; }
+        .msg-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; background: #f0f2f5; font-size: 15px; }
+        .send-btn { border: none; background: none; color: var(--messenger-blue); font-size: 24px; cursor: pointer; }
         @media (min-width: 768px) { .sidebar { width: 360px; } .chat-view { position: static; transform: none; display: none; width: 100%; } .chat-view.active { display: flex; } }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <div style="padding:15px; font-weight:bold; border-bottom:1px solid #eee; color:var(--messenger-blue);">มอธเวดดิ้ง CRM 📊</div>
+        <div style="padding:15px; font-weight:bold; font-size:18px; color:var(--messenger-blue); border-bottom:1px solid #eee;">มอสเวดดิ้ง CRM 📊</div>
         <div id="contactList"></div>
     </div>
 
@@ -35,23 +42,23 @@
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <button onclick="closeChat()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px;">❮</button>
                 <div id="chatTitle" style="font-weight:bold;"></div>
-                <button onclick="syncHistoryNow()" id="syncBtn" style="border:1px solid #ddd; background:#fff; padding:4px 10px; border-radius:10px; font-size:11px;">🔄 Sync ประวัติ</button>
+                <button onclick="syncHistory()" id="syncBtn" style="border:1px solid #ddd; background:#fff; padding:4px 10px; border-radius:10px; font-size:11px;">🔄 Sync ประวัติ</button>
             </div>
-            <div id="aiStatusBar" style="display:flex; justify-content:center;">
-                <span class="status-tag" id="typeTag">📍 ประเภทงาน: -</span>
-                <span class="status-tag" id="budgetTag">💰 งบ: -</span>
-                <span class="status-tag" id="chanceTag">🎯 โอกาส: -</span>
+            <div id="aiStatusBar" style="display:flex; justify-content:center; flex-wrap:wrap; gap:5px;">
+                <span class="status-tag" id="typeTag">📍 -</span>
+                <span class="status-tag" id="budgetTag">💰 -</span>
+                <span class="status-tag" id="chanceTag">🎯 -</span>
             </div>
         </div>
         <div class="chat-container" id="chatBox"></div>
         <div class="ai-area" id="aiPanel" style="display:none;">
             <div id="aiAnalysis" style="font-size:12px; color:#666; font-style:italic; border-bottom:1px dashed #ddd; padding-bottom:5px; margin-bottom:8px;"></div>
             <div id="aiReply" style="font-size:14px; font-weight:500; margin-bottom:10px;"></div>
-            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ใช้คำตอบนี้ 👇</button>
+            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ดึงคำตอบลงช่องพิมพ์ 👇</button>
         </div>
         <div class="input-footer">
             <input type="text" id="msgInput" class="msg-input" placeholder="พิมพ์ข้อความตอบกลับ...">
-            <button onclick="sendMsg()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px;">➤</button>
+            <button onclick="sendMsg()" class="send-btn">➤</button>
         </div>
     </div>
 
@@ -61,58 +68,76 @@
         setInterval(() => { if(curSid) loadMessages(curSid) }, 2000);
 
         async function loadContacts() {
-            let res = await fetch('/api/contacts'), contacts = await res.json(), html = "";
-            contacts.forEach(c => {
-                let tagHtml = (c.ai_tag && c.ai_tag !== 'กำลังวิเคราะห์...') ? `<div class="inbox-tag">${c.ai_tag}</div>` : "";
-                html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name}')">
-                    <img src="${c.profile_pic || 'https://via.placeholder.com/50'}" style="width:48px; height:48px; border-radius:50%;">
-                    <div><div style="font-weight:600;">${c.first_name || 'ลูกค้า'}</div>${tagHtml}</div>
-                </div>`;
-            });
-            document.getElementById('contactList').innerHTML = html;
+            try {
+                let res = await fetch('/api/contacts');
+                let contacts = await res.json();
+                let html = "";
+                contacts.forEach(c => {
+                    let pic = c.profile_pic ? c.profile_pic : 'https://via.placeholder.com/50';
+                    // สร้าง Tag ทั้ง 3 อย่างใน Sidebar
+                    let tagType = c.ai_tag ? `<span class="mini-tag">📍 ${c.ai_tag}</span>` : "";
+                    let tagBudget = (c.ai_budget && c.ai_budget !== 'ไม่ระบุ') ? `<span class="mini-tag">💰 ${c.ai_budget}</span>` : "";
+                    let tagChance = (c.ai_chance > 0) ? `<span class="mini-tag">🎯 ${c.ai_chance}%</span>` : "";
+
+                    html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name || 'ลูกค้า'}')">
+                        <img src="${pic}" class="avatar">
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.first_name || 'ลูกค้า'}</div>
+                            <div style="font-size:12px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.message}</div>
+                            <div class="inbox-tags">${tagType}${tagBudget}${tagChance}</div>
+                        </div>
+                    </div>`;
+                });
+                document.getElementById('contactList').innerHTML = html;
+            } catch (e) {}
         }
 
         function openChat(sid, name) { curSid = sid; document.getElementById('chatTitle').innerText = name; document.getElementById('chatView').classList.add('active'); loadMessages(sid); }
         function closeChat() { curSid = null; document.getElementById('chatView').classList.remove('active'); }
 
         async function loadMessages(sid) {
-            let res = await fetch('/api/messages/' + sid), data = await res.json(), html = "", latestAi = "";
-            if(data.length > 0) {
-                let u = data[0];
-                document.getElementById('typeTag').innerText = "📍 " + u.ai_tag;
-                document.getElementById('budgetTag').innerText = "💰 งบ: " + u.ai_budget;
-                document.getElementById('chanceTag').innerText = "🎯 โอกาส: " + u.ai_chance + "%";
-            }
-            data.forEach(m => {
-                if(m.sender_type === 'ai_suggestion') latestAi = m.message;
-                else if(m.message) html += `<div class="bubble ${m.sender_type}">${m.message}</div>`;
-            });
-            document.getElementById('chatBox').innerHTML = html;
-            document.getElementById('chatBox').scrollTop = document.getElementById('chatBox').scrollHeight;
-            if(latestAi) {
-                let p = latestAi.split('###');
-                document.getElementById('aiAnalysis').innerText = p[0].trim();
-                aiCleanMsg = p[1]?.trim() || "";
-                document.getElementById('aiReply').innerText = aiCleanMsg;
-                document.getElementById('aiPanel').style.display = 'block';
-            } else { document.getElementById('aiPanel').style.display = 'none'; }
+            try {
+                let res = await fetch('/api/messages/' + sid);
+                let data = await res.json();
+                let html = "", latestAi = "";
+                if(data.length > 0) {
+                    let u = data[0];
+                    document.getElementById('typeTag').innerText = "📍 " + (u.ai_tag || '-');
+                    document.getElementById('budgetTag').innerText = "💰 " + (u.ai_budget || '-');
+                    document.getElementById('chanceTag').innerText = "🎯 " + (u.ai_chance || '0') + "%";
+                }
+                data.forEach(m => {
+                    if(m.sender_type === 'ai_suggestion') latestAi = m.message;
+                    else if(m.message) html += `<div class="bubble ${m.sender_type}">${m.message}</div>`;
+                });
+                document.getElementById('chatBox').innerHTML = html;
+                document.getElementById('chatBox').scrollTop = document.getElementById('chatBox').scrollHeight;
+                if(latestAi) {
+                    let p = latestAi.split('###');
+                    document.getElementById('aiAnalysis').innerText = p[0].trim();
+                    aiCleanMsg = p[1]?.trim() || "";
+                    document.getElementById('aiReply').innerText = aiCleanMsg;
+                    document.getElementById('aiPanel').style.display = 'block';
+                } else { document.getElementById('aiPanel').style.display = 'none'; }
+            } catch (e) {}
         }
 
-        function useAi() { document.getElementById('msgInput').value = aiCleanMsg; document.getElementById('msgInput').focus(); }
         async function sendMsg() {
-            let m = document.getElementById('msgInput').value.trim(); if(!m) return;
+            let m = document.getElementById('msgInput').value.trim(); if(!m || !curSid) return;
             document.getElementById('msgInput').value = "";
             await fetch('/api/send_reply', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sender_id:curSid, message:m})});
             loadMessages(curSid);
         }
-        async function syncHistoryNow() {
+
+        async function syncHistory() {
             if(!curSid) return;
             let btn = document.getElementById('syncBtn');
             btn.innerText = "⏳ กำลังดึง...";
             let res = await fetch('/api/sync_history/' + curSid);
-            if(res.ok) { alert("ดึงประวัติสำเร็จ!"); loadMessages(curSid); }
+            if(res.ok) { alert("Sync สำเร็จ!"); loadMessages(curSid); }
             btn.innerText = "🔄 Sync ประวัติ";
         }
+        function useAi() { document.getElementById('msgInput').value = aiCleanMsg; document.getElementById('msgInput').focus(); }
     </script>
 </body>
 </html>
