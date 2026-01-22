@@ -29,8 +29,8 @@ DB_NAME = "mos_chat.db"
 # --- Page Config: จับคู่ ID เพจ กับ ชื่อย่อ/ชื่อเต็ม ---
 PAGE_MAP = {
     # "Page_ID": {"short": "ตัวย่อ", "name": "ชื่อเต็ม", "token": "Access_Token"}
-    "111111111111111": {"short": "WD", "name": "Mos Wedding", "token": "token_page_wedding"},
-    "222222222222222": {"short": "ST", "name": "Mos Suit", "token": "token_page_suit"},
+    "111111111111111": {"short": "WD", "name": "เพจมอธเวดดิ้ง", "token": "token_page_wedding"},
+    "222222222222222": {"short": "ST", "name": "เพจออแกไนซ์", "token": "token_page_suit"},
 }
 DEFAULT_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 
