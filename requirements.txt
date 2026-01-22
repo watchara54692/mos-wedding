@@ -3,3 +3,4 @@ requests
 google-generativeai
 openai
 gunicorn
+pandas
