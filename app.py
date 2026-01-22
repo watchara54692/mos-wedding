@@ -1,85 +1,59 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import sqlite3, requests, os, json
+import psycopg2
+import os
+import requests
 from datetime import datetime
 
-app = Flask(__name__, static_folder='.')
-CORS(app)
+# ===============================
+# CONFIG
+# ===============================
 
-PAGE_TOKEN = os.getenv("PAGE_TOKEN", "")
+DATABASE_URL = os.getenv("DATABASE_URL")
+PAGE_TOKEN = os.getenv("PAGE_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "moswedding")
 
-DB = "db.sqlite3"
+app = Flask(__name__)
+CORS(app)
 
 
-# =========================
+# ===============================
 # DATABASE
-# =========================
+# ===============================
 
-def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_conn():
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
 
-def init_db():
-    db = get_db()
-    c = db.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS customers(
-        sender_id TEXT PRIMARY KEY,
-        first_name TEXT,
-        profile_pic TEXT,
-        ai_tag TEXT DEFAULT 'new',
-        ai_chance INTEGER DEFAULT 0,
-        ai_budget TEXT DEFAULT '-',
-        updated_at TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS messages(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_id TEXT,
-        sender_type TEXT,
-        message TEXT,
-        created_at TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS ai_training(
-        keyword TEXT,
-        analysis TEXT,
-        option_1 TEXT,
-        option_2 TEXT
-    )
-    """)
-
-    db.commit()
-    db.close()
-
-
-init_db()
-
-# =========================
-# FRONTEND
-# =========================
+# ===============================
+# STATIC HTML
+# ===============================
 
 @app.route("/")
-def home():
+def index():
     return send_from_directory(".", "index.html")
 
 
-# =========================
+# ===============================
+# HEALTH CHECK
+# ===============================
+
+@app.route("/health")
+def health():
+    return "OK"
+
+
+# ===============================
 # FACEBOOK WEBHOOK
-# =========================
+# ===============================
 
 @app.route("/webhook", methods=["GET"])
-def verify():
-    if request.args.get("hub.verify_token") == VERIFY_TOKEN:
-        return request.args.get("hub.challenge")
+def verify_webhook():
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    if token == VERIFY_TOKEN:
+        return challenge
     return "Invalid token", 403
 
 
@@ -88,63 +62,117 @@ def webhook():
     data = request.json
 
     for entry in data.get("entry", []):
-        for msg in entry.get("messaging", []):
-            sender = msg["sender"]["id"]
+        for event in entry.get("messaging", []):
 
-            if "message" not in msg:
-                continue
+            sender_id = event["sender"]["id"]
 
-            text = msg["message"].get("text", "")
+            if "message" in event and "text" in event["message"]:
+                msg = event["message"]["text"]
 
-            db = get_db()
-            c = db.cursor()
-
-            c.execute("""
-                INSERT OR IGNORE INTO customers
-                (sender_id, updated_at)
-                VALUES (?,?)
-            """, (sender, now()))
-
-            c.execute("""
-                INSERT INTO messages
-                (sender_id, sender_type, message, created_at)
-                VALUES (?,?,?,?)
-            """, (sender, "user", text, now()))
-
-            db.commit()
-            db.close()
+                save_message(sender_id, msg)
 
     return "ok", 200
 
 
-# =========================
-# API
-# =========================
+# ===============================
+# SAVE MESSAGE
+# ===============================
+
+def save_message(sender_id, message):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO messages (
+            sender_id,
+            sender_type,
+            message,
+            created_at
+        ) VALUES (%s, %s, %s, %s)
+    """, (
+        sender_id,
+        "user",
+        message,
+        datetime.utcnow()
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# ===============================
+# API — CONTACT LIST
+# ===============================
 
 @app.route("/api/contacts")
 def contacts():
-    db = get_db()
-    rows = db.execute("""
-        SELECT * FROM customers
-        ORDER BY updated_at DESC
-    """).fetchall()
-    db.close()
+    conn = get_conn()
+    cur = conn.cursor()
 
-    return jsonify([dict(r) for r in rows])
+    cur.execute("""
+        SELECT sender_id,
+               MAX(message) AS message,
+               MAX(created_at) AS last_time
+        FROM messages
+        GROUP BY sender_id
+        ORDER BY last_time DESC
+        LIMIT 50
+    """)
 
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    data = []
+    for r in rows:
+        data.append({
+            "sender_id": r[0],
+            "first_name": "Facebook User",
+            "profile_pic": "https://i.pravatar.cc/150?u=" + r[0],
+            "message": r[1],
+            "ai_tag": "new",
+            "ai_chance": 30
+        })
+
+    return jsonify(data)
+
+
+# ===============================
+# API — MESSAGES
+# ===============================
 
 @app.route("/api/messages/<sid>")
 def messages(sid):
-    db = get_db()
-    rows = db.execute("""
-        SELECT * FROM messages
-        WHERE sender_id=?
-        ORDER BY id ASC
-    """, (sid,)).fetchall()
-    db.close()
+    conn = get_conn()
+    cur = conn.cursor()
 
-    return jsonify([dict(r) for r in rows])
+    cur.execute("""
+        SELECT sender_type, message
+        FROM messages
+        WHERE sender_id=%s
+        ORDER BY created_at ASC
+        LIMIT 200
+    """, (sid,))
 
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return jsonify([
+        {
+            "sender_type": r[0],
+            "message": r[1],
+            "ai_tag": "lead",
+            "ai_chance": 40,
+            "ai_budget": "ไม่ระบุ"
+        } for r in rows
+    ])
+
+
+# ===============================
+# SEND MESSAGE BACK TO FB
+# ===============================
 
 @app.route("/api/send_reply", methods=["POST"])
 def send_reply():
@@ -161,61 +189,37 @@ def send_reply():
 
     requests.post(url, json=payload)
 
-    db = get_db()
-    db.execute("""
-        INSERT INTO messages(sender_id,sender_type,message,created_at)
-        VALUES (?,?,?,?)
-    """, (sid, "admin", msg, now()))
-    db.commit()
-    db.close()
+    save_admin_message(sid, msg)
 
     return jsonify({"status": "sent"})
 
 
-@app.route("/api/analyze_now/<sid>")
-def analyze(sid):
-    db = get_db()
-    db.execute("""
-        UPDATE customers
-        SET ai_tag='hot',
-            ai_chance=75,
-            ai_budget='300k+',
-            updated_at=?
-        WHERE sender_id=?
-    """, (now(), sid))
-    db.commit()
-    db.close()
+def save_admin_message(sender_id, message):
+    conn = get_conn()
+    cur = conn.cursor()
 
-    return jsonify({"status": "ok"})
+    cur.execute("""
+        INSERT INTO messages (
+            sender_id,
+            sender_type,
+            message,
+            created_at
+        ) VALUES (%s, %s, %s, %s)
+    """, (
+        sender_id,
+        "admin",
+        message,
+        datetime.utcnow()
+    ))
 
-
-@app.route("/api/train", methods=["POST"])
-def train():
-    import csv
-    f = request.files["file"]
-    rows = csv.reader(f.stream.read().decode("utf-8").splitlines())
-
-    db = get_db()
-    db.execute("DELETE FROM ai_training")
-
-    for r in rows:
-        if len(r) < 4:
-            continue
-        db.execute("""
-            INSERT INTO ai_training VALUES (?,?,?,?)
-        """, r)
-
-    db.commit()
-    db.close()
-
-    return jsonify({"status": "success"})
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
-# =========================
-
-def now():
-    return datetime.now().isoformat()
-
+# ===============================
+# RUN LOCAL
+# ===============================
 
 if __name__ == "__main__":
     app.run(debug=True)
