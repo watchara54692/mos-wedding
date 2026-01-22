@@ -1,54 +1,40 @@
 import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.pool import SimpleConnectionPool
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-def get_db():
-    return psycopg2.connect(
-        DATABASE_URL,
-        sslmode="require",
-        cursor_factory=RealDictCursor
-    )
+# connection pool
+pool = SimpleConnectionPool(
+    minconn=1,
+    maxconn=5,
+    dsn=DATABASE_URL,
+    sslmode="require"
+)
+
+
+def get_conn():
+    return pool.getconn()
+
+
+def release_conn(conn):
+    pool.putconn(conn)
 
 
 def init_db():
-    conn = get_db()
+    conn = get_conn()
     cur = conn.cursor()
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS chats (
-            id SERIAL PRIMARY KEY,
-            sender_id TEXT,
-            page_id TEXT,
-            message TEXT,
-            sender_type TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            sender_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            profile_pic TEXT,
-            ai_tag TEXT DEFAULT 'ยังไม่ชัดเจน',
-            ai_chance INTEGER DEFAULT 0,
-            ai_budget TEXT DEFAULT 'ไม่ระบุ',
-            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS knowledge (
-            id SERIAL PRIMARY KEY,
-            keyword TEXT,
-            analysis TEXT,
-            option_1 TEXT,
-            option_2 TEXT
-        );
+    CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        name TEXT,
+        phone TEXT,
+        note TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     """)
 
     conn.commit()
     cur.close()
-    conn.close()
+    release_conn(conn)
