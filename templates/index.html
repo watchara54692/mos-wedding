@@ -3,27 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Mos Wedding CRM</title>
+    <title>มอสเวดดิ้ง CRM 📊</title>
     <style>
         :root { --messenger-blue: #0084ff; --ai-gold: #fff9e6; --tag-blue: #007bff; }
         body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100dvh; overflow: hidden; background: #fff; }
         .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; background: #fff; }
         .contact-list { flex: 1; overflow-y: auto; }
         .contact-item { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+        .contact-item:hover { background: #f5f6f7; }
         .avatar { width: 50px; height: 50px; border-radius: 50%; background: #eee; object-fit: cover; flex-shrink: 0; }
-        .inbox-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-        .mini-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--tag-blue); color: #fff; font-weight: bold; }
+        .mini-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--messenger-blue); color: #fff; font-weight: bold; margin-right: 3px; }
         .chat-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; transform: translateX(100%); transition: 0.3s; display: flex; flex-direction: column; z-index: 20; }
         .chat-view.active { transform: translateX(0); }
         .chat-header { padding: 10px 15px; border-bottom: 1px solid #eee; }
-        .status-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #e7f3ff; color: var(--messenger-blue); font-weight: bold; margin-right: 5px; border: 1px solid #b2d7ff; }
+        .status-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #e7f3ff; color: var(--messenger-blue); font-weight: bold; border: 1px solid #b2d7ff; margin-right: 5px; }
         .chat-container { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-        .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; }
-        .user { align-self: flex-start; background: #f0f2f5; }
+        .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; line-height: 1.4; }
+        .user { align-self: flex-start; background: #f0f2f5; color: #000; }
         .admin { align-self: flex-end; background: var(--messenger-blue); color: #fff; }
         .ai-area { background: var(--ai-gold); padding: 15px; border-top: 1px solid #ffeeba; }
         .footer { padding: 10px; display: flex; gap: 10px; border-top: 1px solid #eee; }
-        .msg-input { flex: 1; padding: 10px 15px; border-radius: 20px; border: 1px solid #ddd; background: #f0f2f5; outline: none; }
+        .msg-input { flex: 1; padding: 10px 15px; border-radius: 25px; border: 1px solid #ddd; background: #f0f2f5; outline: none; }
         @media (min-width: 768px) { .sidebar { width: 360px; } .chat-view { position: static; transform: none; display: none; width: 100%; } .chat-view.active { display: flex; } }
     </style>
 </head>
@@ -38,7 +38,7 @@
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <button onclick="closeChat()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px;">❮</button>
                 <div id="chatTitle" style="font-weight:bold;"></div>
-                <div id="syncStatus" style="font-size:11px; color:#aaa;"></div>
+                <div id="syncStatus" style="font-size:11px; color:#0084ff; font-weight:bold;"></div>
             </div>
             <div style="display:flex; justify-content:center; margin-top:8px;">
                 <span class="status-tag" id="typeTag">📍 -</span>
@@ -49,8 +49,8 @@
         <div class="chat-container" id="chatBox"></div>
         <div class="ai-area" id="aiPanel" style="display:none;">
             <div id="aiAnalysis" style="font-size:12px; color:#666; font-style:italic; border-bottom:1px dashed #ddd; padding-bottom:5px; margin-bottom:8px;"></div>
-            <div id="aiReply" style="font-size:14px; font-weight:500; margin-bottom:10px;"></div>
-            <button onclick="useAi()" style="width:100%; background:#fff; border:1.5px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ดึงคำตอบลงช่องพิมพ์ 👇</button>
+            <div id="aiReply" style="font-size:14px; font-weight:500; margin-bottom:12px;"></div>
+            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold;">ใช้คำตอบนี้ 👇</button>
         </div>
         <div class="footer">
             <input type="text" id="msgInput" class="msg-input" placeholder="พิมพ์ข้อความตอบกลับ...">
@@ -60,8 +60,14 @@
 
     <script>
         let curSid = null, aiCleanMsg = "", contactOffset = 0, isLoading = false;
-        
-        loadContacts(true);
+
+        // เริ่มต้น: กู้คืนรายชื่อจาก Facebook
+        async function initApp() {
+            await fetch('/api/refresh_contacts');
+            loadContacts(true);
+        }
+        initApp();
+
         setInterval(() => { if(!isLoading && contactOffset <= 20) loadContacts(true) }, 5000);
         setInterval(() => { if(curSid) loadMessages(curSid) }, 2500);
 
@@ -71,16 +77,15 @@
             try {
                 let res = await fetch(`/api/contacts?limit=20&offset=${contactOffset}`);
                 let data = await res.json();
-                if (data.length === 0) { isLoading = false; return; }
                 let html = "";
                 data.forEach(c => {
-                    let tags = `<div class="inbox-tags">
+                    let tags = `<div style="display:flex; gap:3px; margin-top:5px;">
                         ${c.ai_tag ? `<span class="mini-tag">📍 ${c.ai_tag}</span>` : ""}
                         ${(c.ai_budget && c.ai_budget !== '-') ? `<span class="mini-tag">💰 ${c.ai_budget}</span>` : ""}
                         ${c.ai_chance > 0 ? `<span class="mini-tag">🎯 ${c.ai_chance}%</span>` : ""}
                     </div>`;
                     html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name || 'ลูกค้า'}')">
-                        <img src="${c.profile_pic || 'https://via.placeholder.com/50'}" class="avatar">
+                        <img src="${c.profile_pic || 'https://via.placeholder.com/50'}" class="avatar" onerror="this.src='https://via.placeholder.com/50'">
                         <div style="flex:1; min-width:0;">
                             <div style="font-weight:600;">${c.first_name || 'ลูกค้า'}</div>
                             <div style="font-size:12px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.message}</div>
@@ -103,10 +108,10 @@
             curSid = sid; 
             document.getElementById('chatTitle').innerText = name; 
             document.getElementById('chatView').classList.add('active'); 
+            document.getElementById('syncStatus').innerText = "⏳ กำลังดึงแชทเก่า...";
             loadMessages(sid);
-            document.getElementById('syncStatus').innerText = "⏳ Syncing...";
             fetch('/api/sync_history/' + sid).then(() => {
-                document.getElementById('syncStatus').innerText = "✅ Synced";
+                document.getElementById('syncStatus').innerText = "✅ ซิงค์เสร็จแล้ว";
                 loadMessages(sid);
                 setTimeout(() => { document.getElementById('syncStatus').innerText = ""; }, 2000);
             });
