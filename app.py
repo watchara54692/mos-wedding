@@ -1,126 +1,126 @@
+import os
+import json
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from db import get_conn, release_conn
-import os
+from db import get_conn
 
 app = Flask(__name__)
 CORS(app)
 
-# ===============================
-# HEALTH CHECK
-# ===============================
-@app.route("/")
-def home():
-    return "MoS Wedding API running"
+PAGE_TOKEN = os.environ.get("PAGE_TOKEN")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 
 
-# ===============================
-# FACEBOOK WEBHOOK VERIFY
-# ===============================
+# =========================
+# Facebook verify webhook
+# =========================
 @app.route("/webhook", methods=["GET"])
-def verify_webhook():
-    VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "moswedding")
-
+def verify():
+    mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
-    if token == VERIFY_TOKEN:
-        return challenge
-    return "Invalid token", 403
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return challenge, 200
+    return "Forbidden", 403
 
 
-# ===============================
-# RECEIVE MESSAGE FROM MESSENGER
-# ===============================
+# =========================
+# Receive message
+# =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
 
-    try:
-        for entry in data.get("entry", []):
-            for event in entry.get("messaging", []):
+    for entry in data.get("entry", []):
+        for event in entry.get("messaging", []):
 
-                sender_id = event["sender"]["id"]
+            sender_id = event["sender"]["id"]
 
-                if "message" in event and "text" in event["message"]:
-                    text = event["message"]["text"]
+            if "message" in event:
+                text = event["message"].get("text", "")
 
-                    conn = get_conn()
-                    cur = conn.cursor()
+                save_customer(sender_id, text)
 
-                    # save message
-                    cur.execute("""
-                        insert into messages (facebook_id, message, sender)
-                        values (%s, %s, 'customer')
-                    """, (sender_id, text))
-
-                    # auto create customer if not exists
-                    cur.execute("""
-                        insert into customers (facebook_id)
-                        values (%s)
-                        on conflict (facebook_id) do nothing
-                    """, (sender_id,))
-
-                    conn.commit()
-                    cur.close()
-                    release_conn(conn)
-
-    except Exception as e:
-        print("WEBHOOK ERROR:", e)
+                reply(sender_id, "ขอบคุณที่ติดต่อ Mos Wedding 💍\nทีมงานจะรีบตอบกลับค่ะ")
 
     return "ok", 200
 
 
-# ===============================
-# PAGINATION API (FAST)
-# ===============================
+# =========================
+# Save to database
+# =========================
+def save_customer(facebook_id, text):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO customers (facebook_id, intent)
+        VALUES (%s, %s)
+        ON CONFLICT (facebook_id) DO NOTHING
+    """, (facebook_id, text))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# =========================
+# Send message back
+# =========================
+def reply(psid, text):
+    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_TOKEN}"
+
+    payload = {
+        "recipient": {"id": psid},
+        "message": {"text": text}
+    }
+
+    requests.post(url, json=payload)
+
+
+# =========================
+# Admin API
+# =========================
 @app.route("/api/customers")
 def customers():
     page = int(request.args.get("page", 1))
-    limit = int(request.args.get("limit", 20))
+    limit = 20
     offset = (page - 1) * limit
 
     conn = get_conn()
     cur = conn.cursor()
 
     cur.execute("""
-        select id, facebook_id, name, phone, intent,
-               budget, wedding_date, note, created_at
-        from customers
-        order by created_at desc
-        limit %s offset %s
+        SELECT id, facebook_id, intent, created_at
+        FROM customers
+        ORDER BY created_at DESC
+        LIMIT %s OFFSET %s
     """, (limit + 1, offset))
 
     rows = cur.fetchall()
-    has_more = len(rows) > limit
 
-    data = rows[:limit]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
 
     cur.close()
-    release_conn(conn)
+    conn.close()
 
     return jsonify({
-        "page": page,
-        "limit": limit,
-        "has_more": has_more,
         "data": [
             {
                 "id": r[0],
                 "facebook_id": r[1],
-                "name": r[2],
-                "phone": r[3],
-                "intent": r[4],
-                "budget": r[5],
-                "wedding_date": r[6],
-                "note": r[7],
-                "created_at": str(r[8])
-            } for r in data
-        ]
+                "intent": r[2],
+                "created_at": r[3].isoformat()
+            } for r in rows
+        ],
+        "page": page,
+        "limit": limit,
+        "has_more": has_more
     })
 
 
-# ===============================
-# RUN
-# ===============================
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
