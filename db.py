@@ -1,11 +1,14 @@
 import sqlite3
 from config import DATABASE_PATH
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from config import DATABASE_URL
 
 def get_db():
-    conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=RealDictCursor
+    )
 
 
 def init_db():
