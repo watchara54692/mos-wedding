@@ -1,7 +1,5 @@
 flask
-google-generativeai
-google-auth
-google-api-python-client
 requests
+google-generativeai
+openai
 gunicorn
-psycopg2-binary
