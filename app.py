@@ -1,54 +1,65 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import psycopg2
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import requests
-from datetime import datetime
-
-# ===============================
-# CONFIG
-# ===============================
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-PAGE_TOKEN = os.getenv("PAGE_TOKEN")
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "moswedding")
+import json
 
 app = Flask(__name__)
 CORS(app)
 
+# ======================
+# CONFIG
+# ======================
 
-# ===============================
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+PAGE_TOKEN = os.getenv("PAGE_TOKEN")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "moswedding")
+
+# ======================
 # DATABASE
-# ===============================
+# ======================
 
 def get_conn():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
 
-# ===============================
-# STATIC HTML
-# ===============================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        sender TEXT,
+        message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+init_db()
+
+# ======================
+# ROOT + HTML
+# ======================
 
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
 
 
-# ===============================
-# HEALTH CHECK
-# ===============================
-
-@app.route("/health")
-def health():
-    return "OK"
-
-
-# ===============================
-# FACEBOOK WEBHOOK
-# ===============================
+# ======================
+# MESSENGER WEBHOOK
+# ======================
 
 @app.route("/webhook", methods=["GET"])
-def verify_webhook():
+def verify():
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
@@ -61,61 +72,57 @@ def verify_webhook():
 def webhook():
     data = request.json
 
-    for entry in data.get("entry", []):
-        for event in entry.get("messaging", []):
+    if "entry" not in data:
+        return "ok"
 
+    for entry in data["entry"]:
+        for event in entry.get("messaging", []):
             sender_id = event["sender"]["id"]
 
             if "message" in event and "text" in event["message"]:
-                msg = event["message"]["text"]
+                text = event["message"]["text"]
 
-                save_message(sender_id, msg)
+                save_message(sender_id, text)
+                send_message(sender_id, "รับข้อความแล้วครับ 🙏")
 
-    return "ok", 200
+    return "ok"
 
 
-# ===============================
-# SAVE MESSAGE
-# ===============================
-
-def save_message(sender_id, message):
+def save_message(sender, text):
     conn = get_conn()
     cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO messages (
-            sender_id,
-            sender_type,
-            message,
-            created_at
-        ) VALUES (%s, %s, %s, %s)
-    """, (
-        sender_id,
-        "user",
-        message,
-        datetime.utcnow()
-    ))
-
+    cur.execute(
+        "INSERT INTO messages (sender, message) VALUES (%s, %s)",
+        (sender, text)
+    )
     conn.commit()
     cur.close()
     conn.close()
 
 
-# ===============================
-# API — CONTACT LIST
-# ===============================
+def send_message(psid, text):
+    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_TOKEN}"
+    payload = {
+        "recipient": {"id": psid},
+        "message": {"text": text}
+    }
+    requests.post(url, json=payload)
+
+
+# ======================
+# API สำหรับ HTML
+# ======================
 
 @app.route("/api/contacts")
 def contacts():
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
-        SELECT sender_id,
-               MAX(message) AS message,
+        SELECT sender,
                MAX(created_at) AS last_time
         FROM messages
-        GROUP BY sender_id
+        GROUP BY sender
         ORDER BY last_time DESC
         LIMIT 50
     """)
@@ -124,102 +131,32 @@ def contacts():
     cur.close()
     conn.close()
 
-    data = []
-    for r in rows:
-        data.append({
-            "sender_id": r[0],
-            "first_name": "Facebook User",
-            "profile_pic": "https://i.pravatar.cc/150?u=" + r[0],
-            "message": r[1],
-            "ai_tag": "new",
-            "ai_chance": 30
-        })
-
-    return jsonify(data)
+    return jsonify(rows)
 
 
-# ===============================
-# API — MESSAGES
-# ===============================
-
-@app.route("/api/messages/<sid>")
-def messages(sid):
+@app.route("/api/messages/<sender>")
+def messages(sender):
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
-        SELECT sender_type, message
+        SELECT sender, message, created_at
         FROM messages
-        WHERE sender_id=%s
+        WHERE sender = %s
         ORDER BY created_at ASC
         LIMIT 200
-    """, (sid,))
+    """, (sender,))
 
     rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    return jsonify([
-        {
-            "sender_type": r[0],
-            "message": r[1],
-            "ai_tag": "lead",
-            "ai_chance": 40,
-            "ai_budget": "ไม่ระบุ"
-        } for r in rows
-    ])
+    return jsonify(rows)
 
 
-# ===============================
-# SEND MESSAGE BACK TO FB
-# ===============================
-
-@app.route("/api/send_reply", methods=["POST"])
-def send_reply():
-    data = request.json
-    sid = data["sender_id"]
-    msg = data["message"]
-
-    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_TOKEN}"
-
-    payload = {
-        "recipient": {"id": sid},
-        "message": {"text": msg}
-    }
-
-    requests.post(url, json=payload)
-
-    save_admin_message(sid, msg)
-
-    return jsonify({"status": "sent"})
-
-
-def save_admin_message(sender_id, message):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO messages (
-            sender_id,
-            sender_type,
-            message,
-            created_at
-        ) VALUES (%s, %s, %s, %s)
-    """, (
-        sender_id,
-        "admin",
-        message,
-        datetime.utcnow()
-    ))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-# ===============================
-# RUN LOCAL
-# ===============================
+# ======================
+# START
+# ======================
 
 if __name__ == "__main__":
     app.run(debug=True)
