@@ -7,17 +7,16 @@
     <style>
         :root { --messenger-blue: #0084ff; --ai-gold: #fff9e6; --tag-blue: #007bff; }
         body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100dvh; overflow: hidden; background: #fff; }
-        .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
-        .contact-list { flex: 1; overflow-y: auto; position: relative; }
+        .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; background: #fff; }
+        .contact-list { flex: 1; overflow-y: auto; }
         .contact-item { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 12px; }
-        .contact-item:hover { background: #f5f6f7; }
         .avatar { width: 50px; height: 50px; border-radius: 50%; background: #eee; object-fit: cover; flex-shrink: 0; }
         .inbox-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
         .mini-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--tag-blue); color: #fff; font-weight: bold; }
         .chat-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; transform: translateX(100%); transition: 0.3s; display: flex; flex-direction: column; z-index: 20; }
         .chat-view.active { transform: translateX(0); }
         .chat-header { padding: 10px 15px; border-bottom: 1px solid #eee; }
-        .status-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #e7f3ff; color: var(--messenger-blue); font-weight: bold; border: 1px solid #b2d7ff; margin-right: 5px; }
+        .status-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: #e7f3ff; color: var(--messenger-blue); font-weight: bold; margin-right: 5px; border: 1px solid #b2d7ff; }
         .chat-container { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
         .bubble { max-width: 75%; padding: 8px 14px; border-radius: 18px; font-size: 15px; }
         .user { align-self: flex-start; background: #f0f2f5; }
@@ -51,7 +50,7 @@
         <div class="ai-area" id="aiPanel" style="display:none;">
             <div id="aiAnalysis" style="font-size:12px; color:#666; font-style:italic; border-bottom:1px dashed #ddd; padding-bottom:5px; margin-bottom:8px;"></div>
             <div id="aiReply" style="font-size:14px; font-weight:500; margin-bottom:10px;"></div>
-            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold;">ดึงคำตอบลงช่องพิมพ์ 👇</button>
+            <button onclick="useAi()" style="width:100%; background:#fff; border:1.5px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ดึงคำตอบลงช่องพิมพ์ 👇</button>
         </div>
         <div class="footer">
             <input type="text" id="msgInput" class="msg-input" placeholder="พิมพ์ข้อความตอบกลับ...">
@@ -62,19 +61,17 @@
     <script>
         let curSid = null, aiCleanMsg = "", contactOffset = 0, isLoading = false;
         
-        // โหลดข้อมูลครั้งแรก
         loadContacts(true);
-        setInterval(() => { if(!isLoading && contactOffset <= 20) loadContacts(true) }, 5000); // อัปเดตเฉพาะหน้าแรก
+        setInterval(() => { if(!isLoading && contactOffset <= 20) loadContacts(true) }, 5000);
         setInterval(() => { if(curSid) loadMessages(curSid) }, 2500);
 
         async function loadContacts(reset = false) {
-            if (reset) { contactOffset = 0; }
+            if (reset) contactOffset = 0;
             isLoading = true;
             try {
                 let res = await fetch(`/api/contacts?limit=20&offset=${contactOffset}`);
                 let data = await res.json();
                 if (data.length === 0) { isLoading = false; return; }
-                
                 let html = "";
                 data.forEach(c => {
                     let tags = `<div class="inbox-tags">
@@ -91,19 +88,15 @@
                         </div>
                     </div>`;
                 });
-                
                 if (reset) document.getElementById('contactList').innerHTML = html;
                 else document.getElementById('contactList').insertAdjacentHTML('beforeend', html);
-                
                 contactOffset += data.length;
             } catch (e) {}
             isLoading = false;
         }
 
         function handleScroll(el) {
-            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50 && !isLoading) {
-                loadContacts();
-            }
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50 && !isLoading) loadContacts();
         }
 
         async function openChat(sid, name) { 
@@ -111,7 +104,6 @@
             document.getElementById('chatTitle').innerText = name; 
             document.getElementById('chatView').classList.add('active'); 
             loadMessages(sid);
-            // Auto-Sync ทันทีที่เข้าห้องแชท
             document.getElementById('syncStatus').innerText = "⏳ Syncing...";
             fetch('/api/sync_history/' + sid).then(() => {
                 document.getElementById('syncStatus').innerText = "✅ Synced";
