@@ -67,30 +67,31 @@
         setInterval(loadContacts, 3000);
         setInterval(() => { if(curSid) loadMessages(curSid) }, 2000);
 
-        async function loadContacts() {
-            try {
-                let res = await fetch('/api/contacts');
-                let contacts = await res.json();
-                let html = "";
-                contacts.forEach(c => {
-                    let pic = c.profile_pic ? c.profile_pic : 'https://via.placeholder.com/50';
-                    // สร้าง Tag ทั้ง 3 อย่างใน Sidebar
-                    let tagType = c.ai_tag ? `<span class="mini-tag">📍 ${c.ai_tag}</span>` : "";
-                    let tagBudget = (c.ai_budget && c.ai_budget !== 'ไม่ระบุ') ? `<span class="mini-tag">💰 ${c.ai_budget}</span>` : "";
-                    let tagChance = (c.ai_chance > 0) ? `<span class="mini-tag">🎯 ${c.ai_chance}%</span>` : "";
+        // แก้ไขเฉพาะฟังก์ชัน loadContacts() เพื่อให้ Tag สีน้ำเงินขึ้นครบใน Inbox
+async function loadContacts() {
+    try {
+        let res = await fetch('/api/contacts');
+        let contacts = await res.json();
+        let html = "";
+        contacts.forEach(c => {
+            let pic = c.profile_pic || 'https://via.placeholder.com/50';
+            // Tag สีน้ำเงิน 3 อย่างใต้ชื่อลูกค้า
+            let tagType = c.ai_tag ? `<span class="mini-tag">📍 ${c.ai_tag}</span>` : "";
+            let tagBudget = (c.ai_budget && c.ai_budget !== 'ไม่ระบุ') ? `<span class="mini-tag">💰 ${c.ai_budget}</span>` : "";
+            let tagChance = (c.ai_chance > 0) ? `<span class="mini-tag">🎯 ${c.ai_chance}%</span>` : "";
 
-                    html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name || 'ลูกค้า'}')">
-                        <img src="${pic}" class="avatar">
-                        <div style="flex:1; min-width:0;">
-                            <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.first_name || 'ลูกค้า'}</div>
-                            <div style="font-size:12px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.message}</div>
-                            <div class="inbox-tags">${tagType}${tagBudget}${tagChance}</div>
-                        </div>
-                    </div>`;
-                });
-                document.getElementById('contactList').innerHTML = html;
-            } catch (e) {}
-        }
+            html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name || 'ลูกค้า'}')">
+                <img src="${pic}" class="avatar">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.first_name || 'ลูกค้า'}</div>
+                    <div style="font-size:12px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.message}</div>
+                    <div class="inbox-tags">${tagType}${tagBudget}${tagChance}</div>
+                </div>
+            </div>`;
+        });
+        document.getElementById('contactList').innerHTML = html;
+    } catch (e) {}
+}
 
         function openChat(sid, name) { curSid = sid; document.getElementById('chatTitle').innerText = name; document.getElementById('chatView').classList.add('active'); loadMessages(sid); }
         function closeChat() { curSid = null; document.getElementById('chatView').classList.remove('active'); }
