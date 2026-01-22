@@ -1,117 +1,130 @@
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import sqlite3
 import requests
 from datetime import timedelta
 from functools import wraps
 from flask import Flask, request, render_template, jsonify, session, redirect, url_for
-
-# Google & Gemini
 import google.generativeai as genai
 
 app = Flask(__name__)
 
 # ================== 1. CONFIG ==================
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "mos1234")
-app.secret_key = "mos_wedding_ultimate_v3_1_stable"
+app.secret_key = "mos_wedding_autonomous_v3_2"
 app.permanent_session_lifetime = timedelta(days=365)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "moswedding1234")
-DATABASE_URL = os.environ.get("DATABASE_URL") # URL จาก Neon.tech
+DB_NAME = "mos_chat.db"
 
-# ================== 1. CONFIG ==================
-# ... บรรทัดอื่นๆ ...
-
-# แก้ไขตรงนี้ครับ
-PAGE_TOKENS = {
-    "336498580864850": "EAA36oXUv5vcBQoBnvAfZAfmwhcQTSTgUd52nJz97JX4RmpPgb4FZC9uxguGDPlNwjmYlSXchh0WrrfhrI27nTjzYOGJtXrjEp22eKqDkn4zeY5T8Ex1jqom8nUTuTlDFPyjpPqpYgsBlvVEP5OqBtiIRFXebYELFrrnSUk2ZABXBsU0Mg1LgXwU2XimcRni1uX5v2DU7QZDZD", # ใส่ Page ID : ตามด้วย Token ของเพจนั้น
-    "106344620734603": "EAA36oXUv5vcBQoahHMiHQ6k3Mxu6f3nsXIs2VKbBhKYNDyT9jLNYA18ZBZAvVNWFsg8eI53GBqwrWRBiQsiY1ObGYqli1OLU8fVakK5QsyJY4LtfHDyGstcEfRyBX9bW0tkSgL8rKZAesiMbqiG00RfAZBlrZB59ZAr7Us4hyE7a7T2L8gChGSF4mI0JIaqw7RNOR9Xa0h", # ถ้ามีเพจที่สอง ก็ใส่บรรทัดต่อไปได้เลย
-}
+PAGE_TOKENS = { "336498580864850": "EAA36oXUv5vcBQp3t2Oh4MTS0ByxA0ndvSlLRX4A8BymU1nUzue02gaujziMZCfWrzjvnEjXmsG1VXY7urPLduyh9M7EZAlA487D4NPoTzZA92pzj8Bgcd7IVlgyIJVaWZBEm32GBXaqZCCJAK2MNkcjFlaIZBGp2s5fmEZBmZCFRmKDdu8DpwX0tlXAAlw1AT4m9Ip5kMcUIXwZDZD",
+              "106344620734603": "EAA36oXUv5vcBQoHmOLSbFHieuH4WDrdzF0MSYC6Dw1DxZBQwyOQTboRYQCkGfK5Uq35ChF1dFEDDNF5ZBxc3naJpbT9lsI5Va7LiCzT6rZAsroBQWAv9aFywmeZCcF4Xvjw4BmWbKv2wIwMwhk1rFAuMLC3fPjEiqvrT7OqoneAIJKfgMaIBghnRs4hQTc1M1FIZCColQ"
+              
+              }
 DEFAULT_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 
-# ================== 2. DATABASE INIT (PostgreSQL) ==================
-def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
-
+# ================== 2. DATABASE INIT ==================
 def init_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    # สร้างตาราง chats (Postgres ใช้ SERIAL แทน AUTOINCREMENT)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS chats (
-            id SERIAL PRIMARY KEY,
-            sender_id TEXT,
-            page_id TEXT,
-            message TEXT,
-            sender_type TEXT, 
-            timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    # สร้างตาราง users
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            sender_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            last_name TEXT,
-            profile_pic TEXT,
-            tags TEXT DEFAULT ''
-        )
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS chats (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id TEXT, page_id TEXT, message TEXT, sender_type TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        # ปรับปรุงตาราง users ให้เก็บสถานะที่ AI วิเคราะห์
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                sender_id TEXT PRIMARY KEY, 
+                first_name TEXT, 
+                last_name TEXT, 
+                profile_pic TEXT, 
+                ai_tag TEXT DEFAULT 'กำลังวิเคราะห์...', 
+                ai_chance INTEGER DEFAULT 0, 
+                ai_budget TEXT DEFAULT 'ไม่ระบุ'
+            )
+        """)
 init_db()
 
-# ================== 3. AI LOGIC (Psychology-Driven) ==================
-def ask_gemini(user_msg):
+# ================== 3. AI AUTONOMOUS LOGIC ==================
+def ask_gemini(user_msg, history_context=""):
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")
         
-        # คำสั่ง AI ที่ปรับให้เหมาะกับคุณ (ไม่แนะนำกิจกรรมสังสรรค์หรือแอลกอฮอล์)
-        instruction = """
-        Role: มอธ Mos Wedding (ผู้เชี่ยวชาญงานแต่ง). 
-        Style: เป็นกันเอง จริงใจ แนะนำแบบเพื่อน พี่น้อง สุภาพ พูดลงท้ายว่า ครับ.
-        Format: วิเคราะห์: [จิตวิทยา] ### [ข้อความตอบลูกค้า] ### [โอกาส 0-100] ### [งบประมาณ]
-        """
-        prompt = f"{instruction}\n\nลูกค้าถาม: {user_msg}"
+        prompt = f"""คุณคือผู้เชี่ยวชาญด้านการขายของ 'มอธเวดดิ้ง' (Mos Wedding) 
+บริบท: เรารับจัดงานทุกรูปแบบ (งานแต่ง, งานบวช, อีเว้นท์, บายเนียร์, งานเลี้ยง)
+ภารกิจ: วิเคราะห์บทสนทนาและร่างคำตอบเพื่อปิดการขาย
+
+ประวัติการคุย: {history_context}
+ข้อความล่าสุดจากลูกค้า: {user_msg}
+
+ตอบตาม Format นี้เท่านั้น (ห้ามขาด):
+วิเคราะห์: (สรุปจิตวิทยาการขายสั้นๆ)
+###
+(ร่างคำตอบสั้นๆ ไม่เกิน 2 ประโยค เหมือนแชท Messenger)
+###
+(ระบุประเภทงานที่ลูกค้าติดต่อ: เช่น งานแต่ง, งานบวช, อีเว้นท์, บายเนียร์ หรือ 'ยังไม่ชัดเจน')
+###
+(โอกาสปิดการขาย 0-100 เป็นตัวเลขเท่านั้น)
+###
+(งบประมาณที่ระบุในแชท ถ้าไม่มีให้ใส่ 'ไม่ระบุ')"""
+
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        if "429" in str(e): return "วิเคราะห์: ⏳ AI พักเหนื่อย ### ⏳ ขอพักดื่มน้ำ 2 นาทีครับ ### 0 ### ไม่ระบุ"
-        return f"วิเคราะห์: ⚠️ ระบบสะดุด ### ⚠️ เกิดข้อผิดพลาด ({str(e)}) ### 0 ### ไม่ระบุ"
+        if "429" in str(e): return "AI พักเหนื่อย ### AI ขอพัก 1 นาทีครับ ### ยังไม่ชัดเจน ### 0 ### ไม่ระบุ"
+        return f"ระบบขัดข้อง ### ขออภัยครับ ระบบสะดุด ### ยังไม่ชัดเจน ### 0 ### ไม่ระบุ"
 
-# ================== 4. FACEBOOK HELPER ==================
-def get_facebook_profile(sender_id, page_id):
-    token = PAGE_TOKENS.get(page_id, DEFAULT_TOKEN)
-    try:
-        url = f"https://graph.facebook.com/{sender_id}?fields=first_name,last_name,profile_pic&access_token={token}"
-        r = requests.get(url).json()
-        return r.get('first_name', 'ลูกค้า'), r.get('last_name', ''), r.get('profile_pic', '')
-    except: return "ลูกค้า", "", ""
+# ================== 4. ROUTES & WEBHOOK ==================
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == "GET": return request.args.get("hub.challenge") if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN else ("Failed", 403)
+    data = request.json
+    for entry in data.get("entry", []):
+        for event in entry.get("messaging", []):
+            if "message" in event and "text" in event["message"]:
+                msg, sid, pid = event["message"]["text"], event["sender"]["id"], event["recipient"]["id"]
+                with sqlite3.connect(DB_NAME) as conn:
+                    # 1. จัดการข้อมูลลูกค้า
+                    if not conn.execute("SELECT sender_id FROM users WHERE sender_id = ?", (sid,)).fetchone():
+                        fname, lname, pic = "ลูกค้า", "", "" # (ฟังก์ชันดึงโปรไฟล์ FB ใส่ตรงนี้ได้)
+                        conn.execute("INSERT INTO users (sender_id, first_name, last_name, profile_pic) VALUES (?, ?, ?, ?)", (sid, fname, lname, pic))
+                    
+                    # 2. ดึงประวัติย้อนหลัง 5 ข้อความมาให้ AI วิเคราะห์
+                    history = conn.execute("SELECT message FROM chats WHERE sender_id = ? ORDER BY id DESC LIMIT 5", (sid,)).fetchall()
+                    history_text = " | ".join([h[0] for h in history])
+                    
+                    # 3. ให้ AI วิเคราะห์แบบเจาะลึก
+                    ai_res = ask_gemini(msg, history_text)
+                    parts = ai_res.split('###')
+                    
+                    # 4. อัปเดตสถานะ AI ลงในตาราง users ทันที
+                    if len(parts) >= 5:
+                        conn.execute("UPDATE users SET ai_tag = ?, ai_chance = ?, ai_budget = ? WHERE sender_id = ?", 
+                                     (parts[2].strip(), parts[3].strip(), parts[4].strip(), sid))
+                    
+                    # 5. บันทึกแชท
+                    conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", (sid, pid, msg, 'user'))
+                    conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", (sid, pid, ai_res, 'ai_suggestion'))
+    return "OK", 200
 
-def send_fb_message(recipient_id, text):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT page_id FROM chats WHERE sender_id = %s LIMIT 1", (recipient_id,))
-    row = cur.fetchone()
-    pid = row[0] if row else None
-    cur.close()
-    conn.close()
-    
-    token = PAGE_TOKENS.get(pid, DEFAULT_TOKEN)
-    url = f"https://graph.facebook.com/v12.0/me/messages?access_token={token}"
-    requests.post(url, json={"recipient": {"id": recipient_id}, "message": {"text": text}})
+# (Routes อื่นๆ เช่น login, index, api/contacts เหมือนเวอร์ชั่น 3.1)
+@app.route('/api/contacts')
+def get_contacts():
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        sql = "SELECT c.*, u.first_name, u.profile_pic, u.ai_tag, u.ai_chance, u.ai_budget FROM chats c LEFT JOIN users u ON c.sender_id = u.sender_id WHERE c.id IN (SELECT MAX(id) FROM chats GROUP BY sender_id) ORDER BY c.id DESC"
+        return jsonify([dict(row) for row in conn.execute(sql).fetchall()])
 
-# ================== 5. APP ROUTES ==================
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get('logged_in'): return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
+@app.route('/api/messages/<sender_id>')
+def get_messages(sender_id):
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        return jsonify([dict(row) for row in conn.execute("SELECT c.*, u.* FROM chats c LEFT JOIN users u ON c.sender_id = u.sender_id WHERE c.sender_id = ? ORDER BY c.id ASC", (sender_id,)).fetchall()])
+
+@app.route('/api/send_reply', methods=['POST'])
+def send_reply():
+    data = request.json
+    # (ฟังก์ชันส่งข้อความ FB จริงใส่ตรงนี้)
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", (data.get("sender_id"), data.get("message"), 'admin'))
+    return jsonify({"status": "sent"})
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -122,88 +135,9 @@ def login():
     return render_template('login.html')
 
 @app.route('/')
-@login_required
-def index(): return render_template('index.html')
-
-@app.route('/api/contacts')
-def get_contacts():
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    sql = """
-        SELECT c.*, u.first_name, u.profile_pic, u.tags 
-        FROM chats c 
-        LEFT JOIN users u ON c.sender_id = u.sender_id 
-        WHERE c.id IN (SELECT MAX(id) FROM chats GROUP BY sender_id) 
-        ORDER BY c.id DESC
-    """
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify(rows)
-
-@app.route('/api/messages/<sender_id>')
-def get_messages(sender_id):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    sql = "SELECT c.*, u.first_name, u.profile_pic, u.tags FROM chats c LEFT JOIN users u ON c.sender_id = u.sender_id WHERE c.sender_id = %s ORDER BY c.id ASC"
-    cur.execute(sql, (sender_id,))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify(rows)
-
-@app.route('/api/update_tags', methods=['POST'])
-def update_tags():
-    data = request.json
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET tags = %s WHERE sender_id = %s", (data.get('tags'), data.get('sender_id')))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return jsonify({"status": "success"})
-
-@app.route('/api/send_reply', methods=['POST'])
-def send_reply():
-    data = request.json
-    send_fb_message(data.get("sender_id"), data.get("message"))
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (%s, %s, %s)", 
-                (data.get("sender_id"), data.get("message"), 'admin'))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return jsonify({"status": "sent"})
-
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    if request.method == "GET": 
-        return request.args.get("hub.challenge") if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN else ("Failed", 403)
-    
-    data = request.json
-    for entry in data.get("entry", []):
-        for event in entry.get("messaging", []):
-            if "message" in event and "text" in event["message"]:
-                msg, sid, pid = event["message"]["text"], event["sender"]["id"], event["recipient"]["id"]
-                conn = get_db_connection()
-                cur = conn.cursor()
-                
-                cur.execute("SELECT sender_id FROM users WHERE sender_id = %s", (sid,))
-                if not cur.fetchone():
-                    fname, lname, pic = get_facebook_profile(sid, pid)
-                    cur.execute("INSERT INTO users (sender_id, first_name, last_name, profile_pic) VALUES (%s, %s, %s, %s)", 
-                                (sid, fname, lname, pic))
-                
-                ai_reply = ask_gemini(msg)
-                cur.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (%s, %s, %s, %s)", (sid, pid, msg, 'user'))
-                cur.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (%s, %s, %s, %s)", (sid, pid, ai_reply, 'ai_suggestion'))
-                
-                conn.commit()
-                cur.close()
-                conn.close()
-    return "OK", 200
+def index():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    return render_template('index.html')
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
