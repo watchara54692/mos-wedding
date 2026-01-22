@@ -1,1 +1,101 @@
-test
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mos Wedding Admin</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #f0f2f5; display: flex; flex-direction: column; height: 100vh; }
+        .header { background: #fff; padding: 15px; text-align: center; font-weight: bold; border-bottom: 1px solid #ddd; position: fixed; top: 0; width: 100%; z-index: 10; }
+        .chat-container { flex: 1; padding: 60px 10px 180px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        
+        .bubble { max-width: 80%; padding: 10px 15px; border-radius: 18px; line-height: 1.4; font-size: 15px; }
+        .user { align-self: flex-start; background: #e4e6eb; color: #000; border-bottom-left-radius: 4px; }
+        .admin { align-self: flex-end; background: #0084ff; color: #fff; border-bottom-right-radius: 4px; }
+        
+        /* กล่อง AI ด้านล่าง */
+        .ai-control { position: fixed; bottom: 0; width: 100%; background: #fff; padding: 15px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); border-top-left-radius: 20px; border-top-right-radius: 20px; box-sizing: border-box; }
+        .ai-suggestion { background: #fff9c4; padding: 10px; border-radius: 10px; margin-bottom: 10px; font-size: 14px; border: 1px dashed #fbc02d; color: #555; }
+        .input-box { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 20px; font-size: 16px; margin-bottom: 10px; box-sizing: border-box; }
+        .btn-send { width: 100%; background: #0084ff; color: white; border: none; padding: 12px; border-radius: 20px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .btn-send:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+
+    <div class="header">Mos Wedding Chat 💬</div>
+    
+    <div class="chat-container" id="chatBox">
+        <div style="text-align:center; color:#999; margin-top:50px;">รอโหลดข้อความ...</div>
+    </div>
+
+    <div class="ai-control">
+        <div id="aiSuggestion" class="ai-suggestion" style="display:none;">
+            🤖 <strong>AI แนะนำ:</strong> <span id="aiText">กำลังวิเคราะห์...</span>
+            <button onclick="useSuggestion()" style="background:none; border:none; color:#0084ff; font-weight:bold; float:right;">ใช้ข้อความนี้</button>
+        </div>
+        <textarea id="replyInput" class="input-box" rows="2" placeholder="พิมพ์ข้อความ..."></textarea>
+        <button class="btn-send" onclick="sendReply()">🚀 ส่งข้อความ</button>
+    </div>
+
+    <script>
+        let lastSenderId = ""; // จำไว้ว่าคุยกับใครล่าสุด
+
+        // 1. ดึงแชททุก 2 วินาที (Real-time แบบบ้านๆ)
+        setInterval(loadChats, 2000);
+
+        async function loadChats() {
+            try {
+                let res = await fetch('/api/chats');
+                let chats = await res.json();
+                let html = "";
+                let aiText = "";
+                
+                chats.forEach(c => {
+                    if (c.sender_type === 'user') {
+                        html += `<div class="bubble user">👤 ${c.message}</div>`;
+                        lastSenderId = c.sender_id; // อัปเดต ID คนล่าสุด
+                    } else if (c.sender_type === 'admin') {
+                        html += `<div class="bubble admin">${c.message}</div>`;
+                    } else if (c.sender_type === 'ai_suggestion') {
+                        // ถ้าเป็นคำแนะนำ AI เก็บไว้โชว์ในกล่องเหลือง
+                        aiText = c.message;
+                    }
+                });
+                
+                document.getElementById('chatBox').innerHTML = html;
+                
+                // โชว์กล่อง AI ถ้ามีคำแนะนำ
+                if (aiText) {
+                    document.getElementById('aiSuggestion').style.display = 'block';
+                    document.getElementById('aiText').innerText = aiText;
+                }
+            } catch (e) { console.log(e); }
+        }
+
+        function useSuggestion() {
+            let text = document.getElementById('aiText').innerText;
+            document.getElementById('replyInput').value = text;
+        }
+
+        async function sendReply() {
+            let msg = document.getElementById('replyInput').value;
+            if (!msg || !lastSenderId) return alert("ไม่พบผู้รับ หรือ ข้อความว่างเปล่า");
+
+            document.getElementById('replyInput').value = ""; // เคลียร์ช่อง
+            
+            await fetch('/api/send_reply', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ sender_id: lastSenderId, message: msg })
+            });
+            
+            loadChats(); // รีโหลดทันที
+        }
+    </script>
+</body>
+</html>
