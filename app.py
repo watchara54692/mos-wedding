@@ -1,167 +1,210 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from db import get_conn, release_conn
-import os
-import requests
-from openai import OpenAI
+from db import get_conn
+import csv, io
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 CORS(app)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-PAGE_TOKEN_MAP = {
-    os.getenv("PAGE_ID_1"): os.getenv("PAGE_TOKEN_1"),
-    os.getenv("PAGE_ID_2"): os.getenv("PAGE_TOKEN_2")
-}
+@app.route("/")
+def home():
+    return send_from_directory("static", "index.html")
 
 
-# -----------------------
-# AI วิเคราะห์ intent
-# -----------------------
-def analyze_intent(text):
+# =========================
+# CONTACT LIST
+# =========================
+@app.route("/api/contacts")
+def contacts():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        select sender_id, first_name, profile_pic,
+               ai_tag, ai_chance, last_message
+        from customers
+        order by updated_at desc
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
 
-    prompt = f"""
-คุณคือผู้ช่วยร้าน wedding planner
-
-จำแนก intent ลูกค้าเป็น 1 คำจากนี้เท่านั้น:
-
-- สนใจแพ็กเกจ
-- ขอราคา
-- ขอเบอร์ติดต่อ
-- เช็คราคาสถานที่
-- ยังดูเฉยๆ
-- อื่นๆ
-
-ข้อความ:
-{text}
-
-ตอบเป็นคำเดียวเท่านั้น
-"""
-
-    res = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-
-    return res.choices[0].message.content.strip()
+    return jsonify([
+        {
+            "sender_id": r[0],
+            "first_name": r[1],
+            "profile_pic": r[2],
+            "ai_tag": r[3],
+            "ai_chance": r[4],
+            "message": r[5]
+        } for r in rows
+    ])
 
 
-# -----------------------
-# Reply Messenger
-# -----------------------
-def reply(psid, page_id, text):
+# =========================
+# MESSAGE LIST
+# =========================
+@app.route("/api/messages/<sid>")
+def messages(sid):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        select sender_type, message,
+               coalesce(c.ai_tag,''),
+               coalesce(c.ai_chance,0),
+               coalesce(c.ai_budget,'-')
+        from messages m
+        left join customers c on c.sender_id=m.sender_id
+        where m.sender_id=%s
+        order by m.created_at
+    """, (sid,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
 
-    token = PAGE_TOKEN_MAP.get(page_id)
-    if not token:
-        return
-
-    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={token}"
-
-    requests.post(url, json={
-        "recipient": {"id": psid},
-        "message": {"text": text}
-    })
-
-
-# -----------------------
-# Webhook verify
-# -----------------------
-@app.route("/webhook", methods=["GET"])
-def verify():
-    if request.args.get("hub.verify_token") == os.getenv("VERIFY_TOKEN"):
-        return request.args.get("hub.challenge")
-    return "invalid", 403
+    return jsonify([
+        {
+            "sender_type": r[0],
+            "message": r[1],
+            "ai_tag": r[2],
+            "ai_chance": r[3],
+            "ai_budget": r[4]
+        } for r in rows
+    ])
 
 
-# -----------------------
-# Webhook receive
-# -----------------------
-@app.route("/webhook", methods=["POST"])
+# =========================
+# SEND REPLY
+# =========================
+@app.route("/api/send_reply", methods=["POST"])
+def send_reply():
+    data = request.json
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        insert into messages(sender_id, sender_type, message)
+        values(%s,'admin',%s)
+    """, (data["sender_id"], data["message"]))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "sent"})
+
+
+# =========================
+# AI TRAIN CSV
+# =========================
+@app.route("/api/train", methods=["POST"])
+def train():
+    f = request.files["file"]
+    text = io.StringIO(f.stream.read().decode("utf-8"))
+    reader = csv.DictReader(text)
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    for r in reader:
+        cur.execute("""
+            insert into ai_training(keyword,analysis,option_1,option_2)
+            values(%s,%s,%s,%s)
+        """, (
+            r["keyword"],
+            r["analysis"],
+            r["option_1"],
+            r["option_2"]
+        ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "success"})
+
+
+# =========================
+# SIMPLE AI ANALYSIS
+# =========================
+@app.route("/api/analyze_now/<sid>")
+def analyze(sid):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        select message from messages
+        where sender_id=%s
+        order by created_at desc limit 1
+    """, (sid,))
+    msg = cur.fetchone()
+
+    if not msg:
+        return jsonify({"status": "no message"})
+
+    text = msg[0].lower()
+
+    cur.execute("select * from ai_training")
+    rows = cur.fetchall()
+
+    for r in rows:
+        if r[1].lower() in text:
+            ai_msg = f"{r[2]}###${r[3]}###${r[4]}"
+            cur.execute("""
+                insert into messages(sender_id,sender_type,message)
+                values(%s,'ai_suggestion',%s)
+            """, (sid, ai_msg))
+            conn.commit()
+            break
+
+    cur.close()
+    conn.close()
+    return jsonify({"status": "ok"})
+
+
+# =========================
+# MESSENGER WEBHOOK
+# =========================
+@app.route("/webhook", methods=["GET","POST"])
 def webhook():
+    if request.method == "GET":
+        if request.args.get("hub.verify_token") == "mos_wedding":
+            return request.args.get("hub.challenge")
+        return "invalid"
 
     data = request.json
 
-    for entry in data.get("entry", []):
-        page_id = entry.get("id")
-
-        for m in entry.get("messaging", []):
-            sender = m["sender"]["id"]
+    for e in data.get("entry", []):
+        for m in e.get("messaging", []):
+            sid = m["sender"]["id"]
             text = m.get("message", {}).get("text")
 
             if not text:
                 continue
 
-            intent = analyze_intent(text)
-
             conn = get_conn()
             cur = conn.cursor()
 
             cur.execute("""
-                insert into customers
-                (facebook_id, page_id, intent, last_message)
-                values (%s,%s,%s,%s)
-                on conflict (facebook_id)
+                insert into customers(sender_id,last_message)
+                values(%s,%s)
+                on conflict(sender_id)
                 do update set
-                    intent = excluded.intent,
-                    last_message = excluded.last_message,
-                    created_at = now()
-            """, (sender, page_id, intent, text))
+                    last_message=excluded.last_message,
+                    updated_at=now()
+            """, (sid, text))
+
+            cur.execute("""
+                insert into messages(sender_id,sender_type,message)
+                values(%s,'user',%s)
+            """, (sid, text))
 
             conn.commit()
             cur.close()
-            release_conn(conn)
+            conn.close()
 
-            reply(
-                sender,
-                page_id,
-                f"รับข้อความแล้วครับ ❤️\nสถานะ: {intent}"
-            )
-
-    return "ok", 200
+    return "ok"
 
 
-# -----------------------
-# Admin API
-# -----------------------
-@app.route("/api/customers")
-def customers():
-
-    page = int(request.args.get("page", 1))
-    limit = 20
-    offset = (page - 1) * limit
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        select
-            id, facebook_id, page_id,
-            intent, last_message, created_at
-        from customers
-        order by created_at desc
-        limit %s offset %s
-    """, (limit, offset))
-
-    rows = cur.fetchall()
-    cur.close()
-    release_conn(conn)
-
-    data = []
-    for r in rows:
-        data.append({
-            "id": r[0],
-            "facebook_id": r[1],
-            "page_id": r[2],
-            "intent": r[3],
-            "message": r[4],
-            "created_at": r[5].isoformat()
-        })
-
-    return jsonify(data)
-
-
-@app.route("/")
-def home():
-    return "MoS Wedding AI running"
+if __name__ == "__main__":
+    app.run()
