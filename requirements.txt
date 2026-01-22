@@ -4,3 +4,4 @@ requests
 openai
 pandas
 psycopg2-binary
+flask-cors
