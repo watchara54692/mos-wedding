@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Mos CRM Ultimate</title>
+    <title>Mos Wedding CRM</title>
     <style>
-        :root { --messenger-blue: #0084ff; --ai-gold: #fff9e6; }
+        :root { --messenger-blue: #0084ff; --bg-gray: #f0f2f5; --ai-gold: #fff9e6; }
         body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100dvh; overflow: hidden; }
         .sidebar { width: 100%; height: 100%; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
         .contact-item { padding: 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 10px; }
@@ -20,12 +20,13 @@
         .ai-area { background: var(--ai-gold); padding: 12px; border-top: 1px solid #ffeeba; }
         .input-footer { padding: 10px; border-top: 1px solid #eee; display: flex; gap: 8px; }
         .msg-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; background: #f0f2f5; }
+        .inbox-tag { display: inline-block; margin-top: 4px; padding: 2px 8px; background: #e7f3ff; color: var(--messenger-blue); border-radius: 10px; font-size: 10px; font-weight: bold; }
         @media (min-width: 768px) { .sidebar { width: 360px; } .chat-view { position: static; transform: none; display: none; width: 100%; } .chat-view.active { display: flex; } }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <div style="padding:15px; font-weight:bold; border-bottom:1px solid #eee; color:var(--messenger-blue);">มอสเวดดิ้ง CRM 📊</div>
+        <div style="padding:15px; font-weight:bold; border-bottom:1px solid #eee; color:var(--messenger-blue);">มอธเวดดิ้ง CRM 📊</div>
         <div id="contactList"></div>
     </div>
 
@@ -34,7 +35,7 @@
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <button onclick="closeChat()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px;">❮</button>
                 <div id="chatTitle" style="font-weight:bold;"></div>
-                <button onclick="syncHistory()" style="border:1px solid #ddd; background:#fff; padding:4px 8px; border-radius:10px; font-size:11px;">🔄 Sync ประวัติ</button>
+                <button onclick="syncHistoryNow()" id="syncBtn" style="border:1px solid #ddd; background:#fff; padding:4px 10px; border-radius:10px; font-size:11px;">🔄 Sync ประวัติ</button>
             </div>
             <div id="aiStatusBar" style="display:flex; justify-content:center;">
                 <span class="status-tag" id="typeTag">📍 ประเภทงาน: -</span>
@@ -42,19 +43,12 @@
                 <span class="status-tag" id="chanceTag">🎯 โอกาส: -</span>
             </div>
         </div>
-
         <div class="chat-container" id="chatBox"></div>
-
         <div class="ai-area" id="aiPanel" style="display:none;">
-            <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:bold; color:#856404; margin-bottom:8px;">
-                <span>🤖 AI วิเคราะห์</span>
-                <span id="chanceMeter"></span>
-            </div>
             <div id="aiAnalysis" style="font-size:12px; color:#666; font-style:italic; border-bottom:1px dashed #ddd; padding-bottom:5px; margin-bottom:8px;"></div>
             <div id="aiReply" style="font-size:14px; font-weight:500; margin-bottom:10px;"></div>
-            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ดึงคำตอบลงช่องพิมพ์ 👇</button>
+            <button onclick="useAi()" style="width:100%; background:#fff; border:1px solid #856404; color:#856404; padding:8px; border-radius:10px; font-weight:bold; cursor:pointer;">ใช้คำตอบนี้ 👇</button>
         </div>
-
         <div class="input-footer">
             <input type="text" id="msgInput" class="msg-input" placeholder="พิมพ์ข้อความตอบกลับ...">
             <button onclick="sendMsg()" style="border:none; background:none; color:var(--messenger-blue); font-size:24px;">➤</button>
@@ -69,9 +63,10 @@
         async function loadContacts() {
             let res = await fetch('/api/contacts'), contacts = await res.json(), html = "";
             contacts.forEach(c => {
+                let tagHtml = (c.ai_tag && c.ai_tag !== 'กำลังวิเคราะห์...') ? `<div class="inbox-tag">${c.ai_tag}</div>` : "";
                 html += `<div class="contact-item" onclick="openChat('${c.sender_id}', '${c.first_name}')">
                     <img src="${c.profile_pic || 'https://via.placeholder.com/50'}" style="width:48px; height:48px; border-radius:50%;">
-                    <div><div style="font-weight:600;">${c.first_name || 'ลูกค้า'}</div><div style="font-size:12px; color:#888;">${c.message.substring(0,25)}...</div></div>
+                    <div><div style="font-weight:600;">${c.first_name || 'ลูกค้า'}</div>${tagHtml}</div>
                 </div>`;
             });
             document.getElementById('contactList').innerHTML = html;
@@ -99,7 +94,6 @@
                 document.getElementById('aiAnalysis').innerText = p[0].trim();
                 aiCleanMsg = p[1]?.trim() || "";
                 document.getElementById('aiReply').innerText = aiCleanMsg;
-                document.getElementById('chanceMeter').innerText = `ความมั่นใจ: ${p[3]?.trim() || 0}%`;
                 document.getElementById('aiPanel').style.display = 'block';
             } else { document.getElementById('aiPanel').style.display = 'none'; }
         }
@@ -111,11 +105,13 @@
             await fetch('/api/send_reply', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sender_id:curSid, message:m})});
             loadMessages(curSid);
         }
-        async function syncHistory() {
+        async function syncHistoryNow() {
             if(!curSid) return;
-            await fetch('/api/sync_history/' + curSid);
-            alert("ดึงประวัติสำเร็จ!");
-            loadMessages(curSid);
+            let btn = document.getElementById('syncBtn');
+            btn.innerText = "⏳ กำลังดึง...";
+            let res = await fetch('/api/sync_history/' + curSid);
+            if(res.ok) { alert("ดึงประวัติสำเร็จ!"); loadMessages(curSid); }
+            btn.innerText = "🔄 Sync ประวัติ";
         }
     </script>
 </body>
