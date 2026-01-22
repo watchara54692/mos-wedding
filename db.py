@@ -4,7 +4,6 @@ from psycopg2.pool import SimpleConnectionPool
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# connection pool
 pool = SimpleConnectionPool(
     minconn=1,
     maxconn=5,
