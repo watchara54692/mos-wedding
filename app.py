@@ -28,8 +28,8 @@ DB_NAME = "mos_chat.db"
 
 # *** ใส่ Token ของแต่ละเพจที่นี่ (สำคัญมากสำหรับการดึงชื่อลูกค้า) ***
 PAGE_TOKENS = {
-    "111111111111111": "token_page_A", 
-    "222222222222222": "token_page_B",
+    "111111111111111": "EAA36oXUv5vcBQqCX4s4Le7eLqcLAjIdrrJ9cZA9xcZC5RbZCCu77D3GPO5ZBWm9p71UChSv9x3e59AorwLzQKrzX4GKZAHNMYf96y3C0TsaWFe5rPydA0YSPb4jUFVhibmWqmryQgcaTkPXZB4x7E8NrM8o0BpZBf4ZCaPEfe77n5NZB32wb0lUeN6zgaifdIE3Bm7JbleWAV", 
+    "222222222222222": "EAA36oXUv5vcBQsVUEvVJHQxZA3VebH9rrIoylG4CZAgx0oRXmqaBNaVexebfWZCOyZCN7gJ9BC9Jvf24XLzJ9ZA8YfZBALWJjrDWbN97UYIt74o8QbZCr8o8QNo0hHZBmpZAvHf9QKbstYPZCVMfex4B4ToE3lwsYuRRZA0ZCdxOAucI65gLg6dRgWG9NZACg35u3HyucavBmyeTXrQZDZD",
 }
 # ใช้ Token ตัวแรกเป็นค่า Default กรณีหาไม่เจอ
 DEFAULT_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN") or list(PAGE_TOKENS.values())[0] if PAGE_TOKENS else ""
