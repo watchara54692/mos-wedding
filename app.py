@@ -20,8 +20,13 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "moswedding1234")
 DATABASE_URL = os.environ.get("DATABASE_URL") # URL จาก Neon.tech
 
+# ================== 1. CONFIG ==================
+# ... บรรทัดอื่นๆ ...
+
+# แก้ไขตรงนี้ครับ
 PAGE_TOKENS = {
-    "YOUR_PAGE_ID_1": "YOUR_TOKEN_1",
+    "336498580864850": "EAA36oXUv5vcBQoBnvAfZAfmwhcQTSTgUd52nJz97JX4RmpPgb4FZC9uxguGDPlNwjmYlSXchh0WrrfhrI27nTjzYOGJtXrjEp22eKqDkn4zeY5T8Ex1jqom8nUTuTlDFPyjpPqpYgsBlvVEP5OqBtiIRFXebYELFrrnSUk2ZABXBsU0Mg1LgXwU2XimcRni1uX5v2DU7QZDZD", # ใส่ Page ID : ตามด้วย Token ของเพจนั้น
+    "106344620734603": "EAA36oXUv5vcBQoahHMiHQ6k3Mxu6f3nsXIs2VKbBhKYNDyT9jLNYA18ZBZAvVNWFsg8eI53GBqwrWRBiQsiY1ObGYqli1OLU8fVakK5QsyJY4LtfHDyGstcEfRyBX9bW0tkSgL8rKZAesiMbqiG00RfAZBlrZB59ZAr7Us4hyE7a7T2L8gChGSF4mI0JIaqw7RNOR9Xa0h", # ถ้ามีเพจที่สอง ก็ใส่บรรทัดต่อไปได้เลย
 }
 DEFAULT_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 
