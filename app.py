@@ -1,137 +1,87 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from db import get_conn, release_conn, init_db
+from db import get_db
 
 app = Flask(__name__)
 CORS(app)
 
 
-# -------------------------
-# INIT DB (ตอน start server)
-# -------------------------
-init_db()
-
-
 @app.route("/")
-def health():
+def home():
     return "MoS Wedding API running"
 
 
-# -------------------------
-# CREATE CUSTOMER
-# -------------------------
-@app.post("/customers")
-def create_customer():
-    data = request.json
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO customers (name, phone, note)
-        VALUES (%s, %s, %s)
-        RETURNING id
-    """, (
-        data.get("name"),
-        data.get("phone"),
-        data.get("note")
-    ))
-
-    customer_id = cur.fetchone()[0]
-    conn.commit()
-
-    cur.close()
-    release_conn(conn)
-
-    return jsonify({"id": customer_id})
-
-
-# -------------------------
-# PAGINATION
-# -------------------------
-@app.get("/customers")
-def get_customers():
-    limit = int(request.args.get("limit", 20))
+# -------------------------------
+# GET messages (pagination)
+# -------------------------------
+@app.route("/api/messages", methods=["GET"])
+def get_messages():
     page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 20))
+
     offset = (page - 1) * limit
 
-    conn = get_conn()
+    conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT COUNT(*) FROM customers")
-    total = cur.fetchone()[0]
-
-    cur.execute("""
-        SELECT id, name, phone, note, created_at
-        FROM customers
-        ORDER BY created_at DESC
+    cur.execute(
+        """
+        SELECT id, sender, message, created_at
+        FROM messages
+        ORDER BY id DESC
         LIMIT %s OFFSET %s
-    """, (limit, offset))
+        """,
+        (limit + 1, offset)
+    )
 
     rows = cur.fetchall()
-
     cur.close()
-    release_conn(conn)
+    conn.close()
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    data = [
+        {
+            "id": r[0],
+            "sender": r[1],
+            "message": r[2],
+            "created_at": r[3].isoformat()
+        }
+        for r in rows
+    ]
 
     return jsonify({
-        "data": [
-            {
-                "id": r[0],
-                "name": r[1],
-                "phone": r[2],
-                "note": r[3],
-                "created_at": r[4].isoformat()
-            } for r in rows
-        ],
         "page": page,
         "limit": limit,
-        "total": total,
-        "total_pages": (total + limit - 1) // limit
+        "has_more": has_more,
+        "data": data
     })
 
 
-# -------------------------
-# SINGLE CUSTOMER
-# -------------------------
-@app.get("/customers/<int:id>")
-def get_customer(id):
-    conn = get_conn()
+# -------------------------------
+# POST new message
+# -------------------------------
+@app.route("/api/messages", methods=["POST"])
+def create_message():
+    payload = request.json
+
+    sender = payload.get("sender")
+    message = payload.get("message")
+
+    conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT id, name, phone, note, created_at
-        FROM customers WHERE id=%s
-    """, (id,))
+    cur.execute(
+        """
+        INSERT INTO messages (sender, message)
+        VALUES (%s, %s)
+        """,
+        (sender, message)
+    )
 
-    r = cur.fetchone()
-
-    cur.close()
-    release_conn(conn)
-
-    if not r:
-        return jsonify({"error": "not found"}), 404
-
-    return jsonify({
-        "id": r[0],
-        "name": r[1],
-        "phone": r[2],
-        "note": r[3],
-        "created_at": r[4].isoformat()
-    })
-
-
-# -------------------------
-# DELETE
-# -------------------------
-@app.delete("/customers/<int:id>")
-def delete_customer(id):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM customers WHERE id=%s", (id,))
     conn.commit()
-
     cur.close()
-    release_conn(conn)
+    conn.close()
 
-    return jsonify({"status": "deleted"})
+    return jsonify({"status": "ok"})
