@@ -14,32 +14,33 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# ================== CONFIG & SECURITY ==================
-# ตั้งค่ารหัสผ่าน (ถ้าไม่ตั้งใน Render จะใช้ 'mos1234')
+# ================== CONFIG ==================
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "mos1234")
-app.secret_key = "secret_key_mos_wedding_2026_super_secure"
-app.permanent_session_lifetime = timedelta(days=365) # จำล็อกอิน 1 ปี
+app.secret_key = "secret_key_mos_inbox_v2"
+app.permanent_session_lifetime = timedelta(days=365)
 
-# API Keys
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "moswedding1234")
-FB_PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
-
-# Google Service Account
 SERVICE_ACCOUNT_FILE = "credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/spreadsheets.readonly"]
-
-# Database
 DB_NAME = "mos_chat.db"
 
-# ================== DATABASE INIT ==================
+# *** ใส่ Token ของแต่ละเพจที่นี่ ***
+PAGE_TOKENS = {
+    "111111111111111": "token_page_A", 
+    "222222222222222": "token_page_B",
+}
+DEFAULT_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+
+# ================== DATABASE ==================
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chats (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sender_id TEXT,
+                page_id TEXT,
                 message TEXT,
                 sender_type TEXT, 
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -47,7 +48,7 @@ def init_db():
         """)
 init_db()
 
-# ================== HELPER FUNCTIONS ==================
+# ================== AI & GOOGLE ==================
 def get_google_service(service_name, version):
     try:
         if not os.path.exists(SERVICE_ACCOUNT_FILE): return None
@@ -73,33 +74,38 @@ def ask_gemini(user_msg):
         instruction = get_ai_instruction()
         response = model.generate_content(f"{instruction}\n\nลูกค้าถาม: {user_msg}\nตอบสั้นๆ:")
         return response.text.strip()
-    except Exception as e: return f"Error: {e}"
+    except Exception as e: return f"Error: AI Error ({e})"
 
-def send_fb_message(recipient_id, text):
-    url = f"https://graph.facebook.com/v12.0/me/messages?access_token={FB_PAGE_ACCESS_TOKEN}"
+def send_fb_message(recipient_id, text, specific_page_id=None):
+    if not specific_page_id:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.execute("SELECT page_id FROM chats WHERE sender_id = ? AND page_id IS NOT NULL LIMIT 1", (recipient_id,))
+            row = cursor.fetchone()
+            if row: specific_page_id = row[0]
+    
+    token = PAGE_TOKENS.get(specific_page_id, DEFAULT_TOKEN)
+    if not token: return print(f"❌ No Token for Page {specific_page_id}")
+
+    url = f"https://graph.facebook.com/v12.0/me/messages?access_token={token}"
     payload = {"recipient": {"id": recipient_id}, "message": {"text": text}}
     requests.post(url, json=payload)
 
-# ================== LOGIN DECORATOR ==================
+# ================== ROUTES ==================
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not session.get('logged_in'):
-            return redirect(url_for('login'))
+        if not session.get('logged_in'): return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
-# ================== ROUTES ==================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        password = request.form.get('password')
-        if password == ADMIN_PASSWORD:
-            session.permanent = True # จำยาวๆ
+        if request.form.get('password') == ADMIN_PASSWORD:
+            session.permanent = True
             session['logged_in'] = True
             return redirect(url_for('index'))
-        else:
-            return "❌ รหัสผิด! <a href='/login'>ลองใหม่</a>"
+        else: return "❌ รหัสผิด! <a href='/login'>ลองใหม่</a>"
     return render_template('login.html')
 
 @app.route('/')
@@ -107,15 +113,36 @@ def login():
 def index():
     return render_template('index.html')
 
-@app.route('/api/chats')
+# --- API ใหม่สำหรับ Inbox ---
+
+@app.route('/api/contacts')
 @login_required
-def get_chats():
+def get_contacts():
+    """ดึงรายชื่อลูกค้าที่เคยคุยด้วย (เรียงตามล่าสุด)"""
     with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
-        # ดึง 50 ข้อความล่าสุด
-        cursor = conn.execute("SELECT * FROM chats ORDER BY id DESC LIMIT 50")
+        # Query นี้จะดึงข้อความล่าสุดของแต่ละคนมาโชว์
+        sql = """
+        SELECT sender_id, message, timestamp, sender_type
+        FROM chats 
+        WHERE id IN (
+            SELECT MAX(id) FROM chats GROUP BY sender_id
+        )
+        ORDER BY id DESC
+        """
+        cursor = conn.execute(sql)
         rows = [dict(row) for row in cursor.fetchall()]
-    return jsonify(rows[::-1]) # ส่งกลับแบบ เก่า -> ใหม่
+    return jsonify(rows)
+
+@app.route('/api/messages/<sender_id>')
+@login_required
+def get_messages(sender_id):
+    """ดึงแชททั้งหมดของลูกค้าคนนี้"""
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM chats WHERE sender_id = ? ORDER BY id ASC", (sender_id,))
+        rows = [dict(row) for row in cursor.fetchall()]
+    return jsonify(rows)
 
 @app.route('/api/send_reply', methods=['POST'])
 @login_required
@@ -124,21 +151,18 @@ def send_reply():
     recipient_id = data.get("sender_id")
     text = data.get("message")
     
-    # 1. ยิงเข้า Facebook
     send_fb_message(recipient_id, text)
     
-    # 2. บันทึกว่าแอดมินตอบแล้ว
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", 
                      (recipient_id, text, 'admin'))
     return jsonify({"status": "sent"})
 
+# ================== WEBHOOK ==================
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == "GET":
-        if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN:
-            return request.args.get("hub.challenge")
-        return "Failed", 403
+        return request.args.get("hub.challenge") if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN else ("Failed", 403)
 
     if request.method == "POST":
         data = request.json
@@ -148,16 +172,15 @@ def webhook():
                 if "message" in event and "text" in event["message"]:
                     user_msg = event["message"]["text"]
                     sender_id = event["sender"]["id"]
+                    page_id = event.get("recipient", {}).get("id")
                     
-                    # 1. ให้ AI คิดรอไว้
                     ai_reply = ask_gemini(user_msg)
                     
-                    # 2. บันทึกลง DB
                     with sqlite3.connect(DB_NAME) as conn:
-                        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", 
-                                     (sender_id, user_msg, 'user'))
-                        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", 
-                                     (sender_id, ai_reply, 'ai_suggestion'))
+                        conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", 
+                                     (sender_id, page_id, user_msg, 'user'))
+                        conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", 
+                                     (sender_id, page_id, ai_reply, 'ai_suggestion'))
         return "OK", 200
 
 if __name__ == "__main__":
