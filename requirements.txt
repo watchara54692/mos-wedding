@@ -1,7 +1,6 @@
 flask
+gunicorn
 requests
-google-generativeai
 openai
 pandas
-gunicorn
 psycopg2-binary
