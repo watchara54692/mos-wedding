@@ -1,6 +1,8 @@
 import os, json
 from datetime import timedelta
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "mos_secret")
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "mos1234")
