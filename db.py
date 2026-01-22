@@ -1,5 +1,4 @@
-import sqlite3
-from config import DATABASE_PATH
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from config import DATABASE_URL
