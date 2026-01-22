@@ -7,19 +7,14 @@ CORS(app)
 
 
 # -------------------------
-# health check
+# INIT DB (ตอน start server)
 # -------------------------
+init_db()
+
+
 @app.route("/")
 def health():
     return "MoS Wedding API running"
-
-
-# -------------------------
-# init db (รันครั้งเดียว)
-# -------------------------
-if __name__ == "__main__":
-    init_db()
-    app.run(debug=True)
 
 
 # -------------------------
@@ -52,7 +47,7 @@ def create_customer():
 
 
 # -------------------------
-# PAGINATION (สำคัญมาก)
+# PAGINATION
 # -------------------------
 @app.get("/customers")
 def get_customers():
@@ -78,18 +73,16 @@ def get_customers():
     cur.close()
     release_conn(conn)
 
-    customers = []
-    for r in rows:
-        customers.append({
-            "id": r[0],
-            "name": r[1],
-            "phone": r[2],
-            "note": r[3],
-            "created_at": r[4].isoformat()
-        })
-
     return jsonify({
-        "data": customers,
+        "data": [
+            {
+                "id": r[0],
+                "name": r[1],
+                "phone": r[2],
+                "note": r[3],
+                "created_at": r[4].isoformat()
+            } for r in rows
+        ],
         "page": page,
         "limit": limit,
         "total": total,
@@ -98,7 +91,7 @@ def get_customers():
 
 
 # -------------------------
-# GET SINGLE CUSTOMER
+# SINGLE CUSTOMER
 # -------------------------
 @app.get("/customers/<int:id>")
 def get_customer(id):
@@ -107,8 +100,7 @@ def get_customer(id):
 
     cur.execute("""
         SELECT id, name, phone, note, created_at
-        FROM customers
-        WHERE id=%s
+        FROM customers WHERE id=%s
     """, (id,))
 
     r = cur.fetchone()
