@@ -8,9 +8,9 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# ================== 1. CONFIG & SECURITY ==================
+# ================== 1. CONFIG ==================
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "mos1234")
-app.secret_key = "mos_wedding_ultimate_v3_4"
+app.secret_key = "mos_wedding_autonomous_v3_6"
 app.permanent_session_lifetime = timedelta(days=365)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -34,39 +34,31 @@ def init_db():
                 first_name TEXT, 
                 last_name TEXT, 
                 profile_pic TEXT, 
-                ai_tag TEXT DEFAULT 'กำลังวิเคราะห์...', 
+                ai_tag TEXT DEFAULT 'ยังไม่ชัดเจน', 
                 ai_chance INTEGER DEFAULT 0, 
                 ai_budget TEXT DEFAULT 'ไม่ระบุ'
             )
         """)
 init_db()
 
-# ================== 3. AI & FACEBOOK HELPERS ==================
-def ask_gemini(user_msg, history_context=""):
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = f"""คุณคือผู้เชี่ยวชาญด้านการขายของ 'มอธเวดดิ้ง' (Mos Wedding) 
-วิเคราะห์บทสนทนาและร่างคำตอบสั้นๆ ไม่เกิน 2 ประโยค.
-ประวัติ: {history_context}
-ลูกค้า: {user_msg}
-
-Format: วิเคราะห์: ... ### คำตอบ: ... ### ประเภทงาน ### โอกาส(0-100) ### งบ"""
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        if "429" in str(e): return "วิเคราะห์: AI พักเหนื่อย ### AI ขอพัก 1 นาทีครับ ### ยังไม่ชัดเจน ### 0 ### -"
-        return f"วิเคราะห์: ระบบขัดข้อง ### ขออภัยครับ ระบบสะดุด ### ยังไม่ชัดเจน ### 0 ### -"
+# ================== 3. FACEBOOK API HELPERS ==================
 
 def get_facebook_profile(sender_id, page_id):
-    token = PAGE_TOKENS.get(page_id, DEFAULT_TOKEN)
+    """ดึงชื่อและรูปโปรไฟล์จริงจาก Facebook Graph API"""
+    token = PAGE_TOKENS.get(str(page_id), DEFAULT_TOKEN)
+    if not token: return "ลูกค้า", "", ""
     try:
-        r = requests.get(f"https://graph.facebook.com/{sender_id}?fields=first_name,last_name,profile_pic&access_token={token}").json()
-        return r.get('first_name', 'ลูกค้า'), r.get('last_name', ''), r.get('profile_pic', {}).get('data', {}).get('url', '')
-    except: return "ลูกค้า", "", ""
+        url = f"https://graph.facebook.com/{sender_id}?fields=first_name,last_name,picture.type(large)&access_token={token}"
+        r = requests.get(url).json()
+        fname = r.get('first_name', 'ลูกค้า')
+        lname = r.get('last_name', '')
+        pic = r.get('picture', {}).get('data', {}).get('url', '')
+        return fname, lname, pic
+    except:
+        return "ลูกค้า", "", ""
 
 def sync_chat_history(sender_id, page_id):
-    token = PAGE_TOKENS.get(page_id, DEFAULT_TOKEN)
+    token = PAGE_TOKENS.get(str(page_id), DEFAULT_TOKEN)
     try:
         conv_url = f"https://graph.facebook.com/v12.0/me/conversations?fields=participants&access_token={token}"
         res = requests.get(conv_url).json()
@@ -84,7 +76,44 @@ def sync_chat_history(sender_id, page_id):
         return True
     except: return False
 
-# ================== 4. API ROUTES ==================
+# ================== 4. AI SALES EXPERT ==================
+def ask_gemini(user_msg, history_context=""):
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = f"""คุณคือผู้เชี่ยวชาญการขายของ 'มอธเวดดิ้ง' (Mos Wedding) เกิดปี 1987
+วิเคราะห์บทสนทนาและร่างคำตอบสั้นๆ ไม่เกิน 2 ประโยค.
+ประวัติ: {history_context}
+ลูกค้า: {user_msg}
+Format: วิเคราะห์: ... ### คำตอบ: ... ### ประเภทงาน ### โอกาส(0-100) ### งบ"""
+        return model.generate_content(prompt).text.strip()
+    except:
+        return "วิเคราะห์: AI พักเหนื่อย ### AI ขอพัก 1 นาทีครับ ### ยังไม่ชัดเจน ### 0 ### -"
+
+# ================== 5. ROUTES & WEBHOOK ==================
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == "GET": return request.args.get("hub.challenge") if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN else ("Failed", 403)
+    data = request.json
+    for entry in data.get("entry", []):
+        for event in entry.get("messaging", []):
+            if "message" in event and "text" in event["message"]:
+                msg, sid, pid = event["message"]["text"], str(event["sender"]["id"]), str(event["recipient"]["id"])
+                with sqlite3.connect(DB_NAME) as conn:
+                    # บันทึกข้อมูลลูกค้า/อัปเดตชื่อรูปทุกครั้งที่มีข้อความเข้า
+                    fn, ln, pic = get_facebook_profile(sid, pid)
+                    conn.execute("INSERT OR REPLACE INTO users (sender_id, first_name, last_name, profile_pic) VALUES (?, ?, ?, ?)", (sid, fn, ln, pic))
+                    
+                    h = conn.execute("SELECT message FROM chats WHERE sender_id = ? ORDER BY id DESC LIMIT 5", (sid,)).fetchall()
+                    ai = ask_gemini(msg, " | ".join([x[0] for x in h]))
+                    p = ai.split('###')
+                    if len(p) >= 5:
+                        conn.execute("UPDATE users SET ai_tag = ?, ai_chance = ?, ai_budget = ? WHERE sender_id = ?", (p[2].strip(), p[3].strip(), p[4].strip(), sid))
+                    
+                    conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", (sid, pid, msg, 'user'))
+                    conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", (sid, pid, ai, 'ai_suggestion'))
+    return "OK", 200
+
 @app.route('/api/sync_history/<sender_id>')
 def api_sync(sender_id):
     with sqlite3.connect(DB_NAME) as conn:
@@ -96,7 +125,7 @@ def api_sync(sender_id):
 def get_contacts():
     with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
-        sql = "SELECT c.*, u.first_name, u.profile_pic, u.ai_tag FROM chats c LEFT JOIN users u ON c.sender_id = u.sender_id WHERE c.id IN (SELECT MAX(id) FROM chats GROUP BY sender_id) ORDER BY c.id DESC"
+        sql = "SELECT c.*, u.* FROM chats c LEFT JOIN users u ON c.sender_id = u.sender_id WHERE c.id IN (SELECT MAX(id) FROM chats GROUP BY sender_id) ORDER BY c.id DESC"
         return jsonify([dict(row) for row in conn.execute(sql).fetchall()])
 
 @app.route('/api/messages/<sender_id>')
@@ -108,39 +137,16 @@ def get_messages(sender_id):
 @app.route('/api/send_reply', methods=['POST'])
 def send_reply():
     d = request.json
+    sid = str(d['sender_id'])
     with sqlite3.connect(DB_NAME) as conn:
-        row = conn.execute("SELECT page_id FROM chats WHERE sender_id = ? ORDER BY id DESC LIMIT 1", (d['sender_id'],)).fetchone()
-    token = PAGE_TOKENS.get(row[0] if row else None, DEFAULT_TOKEN)
-    requests.post(f"https://graph.facebook.com/v12.0/me/messages?access_token={token}", json={"recipient": {"id": d['sender_id']}, "message": {"text": d['message']}})
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", (d['sender_id'], d['message'], 'admin'))
-    return jsonify({"status": "sent"})
-
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    if request.method == "GET": return request.args.get("hub.challenge") if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN else ("Failed", 403)
-    data = request.json
-    for entry in data.get("entry", []):
-        for event in entry.get("messaging", []):
-            if "message" in event and "text" in event["message"]:
-                msg, sid, pid = event["message"]["text"], event["sender"]["id"], event["recipient"]["id"]
-                with sqlite3.connect(DB_NAME) as conn:
-                    if not conn.execute("SELECT sender_id FROM users WHERE sender_id = ?", (sid,)).fetchone():
-                        fn, ln, pic = get_facebook_profile(sid, pid)
-                        conn.execute("INSERT INTO users (sender_id, first_name, last_name, profile_pic) VALUES (?, ?, ?, ?)", (sid, fn, ln, pic))
-                    h = conn.execute("SELECT message FROM chats WHERE sender_id = ? ORDER BY id DESC LIMIT 5", (sid,)).fetchall()
-                    ai = ask_gemini(msg, " | ".join([x[0] for x in h]))
-                    p = ai.split('###')
-                    if len(p) >= 5:
-                        conn.execute("UPDATE users SET ai_tag = ?, ai_chance = ?, ai_budget = ? WHERE sender_id = ?", (p[2].strip(), p[3].strip(), p[4].strip(), sid))
-                    conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", (sid, pid, msg, 'user'))
-                    conn.execute("INSERT INTO chats (sender_id, page_id, message, sender_type) VALUES (?, ?, ?, ?)", (sid, pid, ai, 'ai_suggestion'))
-    return "OK", 200
-
-@app.route('/')
-def index():
-    if not session.get('logged_in'): return redirect(url_for('login'))
-    return render_template('index.html')
+        row = conn.execute("SELECT page_id FROM chats WHERE sender_id = ? ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
+    tk = PAGE_TOKENS.get(str(row[0]) if row else None, DEFAULT_TOKEN)
+    r = requests.post(f"https://graph.facebook.com/v12.0/me/messages?access_token={tk}", json={"recipient": {"id": sid}, "message": {"text": d['message']}})
+    if r.status_code == 200:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", (sid, d['message'], 'admin'))
+        return jsonify({"status": "sent"})
+    return jsonify({"status": "error"}), 500
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -148,6 +154,11 @@ def login():
         session.permanent = True; session['logged_in'] = True
         return redirect(url_for('index'))
     return render_template('login.html')
+
+@app.route('/')
+def index():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    return render_template('index.html')
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
