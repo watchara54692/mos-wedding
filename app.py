@@ -1,7 +1,9 @@
 import os
 import datetime
+import sqlite3
+import json
 import requests
-from flask import Flask, request
+from flask import Flask, request, render_template, jsonify
 
 # Google & Gemini
 from google.oauth2 import service_account
@@ -12,142 +14,117 @@ app = Flask(__name__)
 
 # ================== CONFIG ==================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "moswedding1234")
+FB_PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 
-# Service Account
-SCOPES = [
-    "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/spreadsheets.readonly"
-]
+# Service Account (ใช้ไฟล์เดิมที่มีอยู่แล้ว)
 SERVICE_ACCOUNT_FILE = "credentials.json"
+SCOPES = ["https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/spreadsheets.readonly"]
 
-# ================== 🧠 MEMORY STORAGE (ความจำ) ==================
-# ตัวแปรนี้จะเก็บประวัติการคุยของลูกค้าแต่ละคน
-# รูปแบบ: { "facebook_id_123": ["ลูกค้า: ดีครับ", "มอส: สวัสดีครับ", ...] }
-chat_history = {}
+# ================== DATABASE (ความจำถาวร) ==================
+DB_NAME = "mos_chat.db"
 
-# ================== GOOGLE SERVICE HELPER ==================
+def init_db():
+    """สร้างตารางเก็บแชท ถ้ายังไม่มี"""
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS chats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id TEXT,
+            message TEXT,
+            sender_type TEXT, -- 'user' หรือ 'admin' หรือ 'ai_suggestion'
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'unread'
+        )
+        """)
+
+# เรียกใช้งานทันทีเมื่อเริ่มแอป
+init_db()
+
+# ================== HELPER FUNCTIONS ==================
 def get_google_service(service_name, version):
     try:
         if not os.path.exists(SERVICE_ACCOUNT_FILE): return None
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=SCOPES
-        )
+        creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
         return build(service_name, version, credentials=creds)
     except Exception as e:
         print(f"Service Error: {e}")
         return None
 
-# ================== READ BRAIN (Sheets) ==================
 def get_ai_instruction():
-    default_instruction = "Role: Mos Wedding Admin."
-    if not SPREADSHEET_ID: return default_instruction
+    # อ่าน Config จาก Sheets (ถ้ามี) หรือใช้ค่า Default
+    default = "Role: พี่มอส Mos Wedding. ตอบลูกค้าสั้นๆ เป็นกันเอง."
+    if not SPREADSHEET_ID: return default
     service = get_google_service("sheets", "v4")
-    if not service: return default_instruction
+    if not service: return default
     try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range="Config!B1"
-        ).execute()
-        values = result.get("values", [])
-        return values[0][0] if values and len(values) > 0 else default_instruction
-    except Exception: return default_instruction
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="Config!B1").execute()
+        vals = result.get("values", [])
+        return vals[0][0] if vals else default
+    except: return default
 
-# ================== DATA FETCHERS ==================
-def check_calendar():
-    service = get_google_service("calendar", "v3")
-    if not service: return "ไม่สามารถเช็คตารางงานได้"
-    try:
-        now = datetime.datetime.utcnow().isoformat() + "Z"
-        events = service.events().list(
-            calendarId="primary", timeMin=now,
-            maxResults=100, singleEvents=True, orderBy="startTime"
-        ).execute().get("items", [])
-        if not events: return "ว่างครับ (ยังไม่มีงานเร็วๆ นี้)"
-        text = ""
-        for e in events:
-            start = e["start"].get("dateTime", e["start"].get("date"))
-            text += f"- {start}: {e.get('summary','(ไม่มีชื่อ)')}\n"
-        return text
-    except Exception: return "เช็คตารางงานไม่ได้"
-
-def get_packages():
-    if not SPREADSHEET_ID: return "ไม่มีข้อมูลแพ็กเกจ"
-    service = get_google_service("sheets", "v4")
-    if not service: return "ดึงข้อมูลแพ็กเกจไม่ได้"
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range="Services!A2:C20"
-        ).execute()
-        rows = result.get("values", [])
-        text = ""
-        for r in rows:
-            if len(r) >= 2: text += f"- {r[0]}: {r[1]}\n"
-        return text
-    except Exception: return "ไม่พบข้อมูลแพ็กเกจ"
-
-# ================== GEMINI AI (THE BRAIN) ==================
-def ask_gemini(user_msg, sender_id):
+def ask_gemini(user_msg):
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash") # ใช้รุ่น 2.5 ตามที่คุณมี
-
-        calendar_info = check_calendar()
-        packages_info = get_packages()
-        custom_instruction = get_ai_instruction()
-
-        # 1. ดึงประวัติเก่าของคนนี้มา (ถ้ามี)
-        user_history = chat_history.get(sender_id, [])
-        
-        # แปลงเป็นข้อความเดียวเพื่อให้ AI อ่าน
-        history_text = "\n".join(user_history)
-
-        final_prompt = f"""
-{custom_instruction}
-
-[ข้อมูลประกอบ]
-ตารางงาน: {calendar_info}
-แพ็กเกจ: {packages_info}
-
-[ประวัติการสนทนาก่อนหน้า] (สำคัญมาก! ให้อ่านบริบทจากตรงนี้ด้วย)
-{history_text}
-
-[ข้อความล่าสุดจากลูกค้า]
-"{user_msg}"
-"""
-        response = model.generate_content(final_prompt)
-        full_reply = response.text.strip()
-
-        # 2. บันทึกบทสนทนาใหม่ลงความจำ
-        # (เก็บแค่ส่วน "ตอบลูกค้า" ไม่เอาส่วนวิเคราะห์ เพื่อไม่ให้ AI งงตัวเอง)
-        parts = full_reply.split("###")
-        clean_reply = parts[1].strip() if len(parts) >= 2 else full_reply
-        
-        # เก็บแบบ: "User: ข้อความ" และ "Bot: ข้อความ"
-        if sender_id not in chat_history:
-            chat_history[sender_id] = []
-        
-        chat_history[sender_id].append(f"Customer: {user_msg}")
-        chat_history[sender_id].append(f"Mos: {clean_reply}")
-
-        # จำกัดความจำไว้แค่ 20 ประโยคล่าสุด (กันยาวเกิน)
-        if len(chat_history[sender_id]) > 20:
-            chat_history[sender_id] = chat_history[sender_id][-20:]
-
-        return full_reply
-
+        model = genai.GenerativeModel("gemini-2.5-flash") # รุ่นที่คุณใช้ได้
+        instruction = get_ai_instruction()
+        # ใส่ Logic ดึงปฏิทิน/แพ็กเกจตรงนี้เพิ่มได้ตามเดิม
+        prompt = f"{instruction}\n\nลูกค้าถาม: {user_msg}\nตอบสั้นๆ:"
+        response = model.generate_content(prompt)
+        return response.text.strip()
     except Exception as e:
-        return f"System Error ### ขออภัยครับ ระบบขัดข้อง ({str(e)})"
+        return f"Error: {e}"
 
-# ================== SERVER & LOGIC ==================
+def send_fb_message(recipient_id, text):
+    """ส่งข้อความกลับเข้า Facebook จริงๆ"""
+    url = f"https://graph.facebook.com/v12.0/me/messages?access_token={FB_PAGE_ACCESS_TOKEN}"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": text}
+    }
+    requests.post(url, json=payload)
+
+# ================== WEB ROUTES (หน้าจอแอป) ==================
+@app.route("/")
+def index():
+    # เปิดหน้าจอแชท
+    return render_template("index.html")
+
+@app.route("/api/chats")
+def get_chats():
+    # ดึงประวัติแชทล่าสุดไปโชว์หน้าจอ
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        # ดึง 50 ข้อความล่าสุด
+        cursor = conn.execute("SELECT * FROM chats ORDER BY id DESC LIMIT 50")
+        rows = [dict(row) for row in cursor.fetchall()]
+    return jsonify(rows[::-1]) # กลับด้านให้ข้อความเก่าอยู่บน
+
+@app.route("/api/send_reply", methods=["POST"])
+def send_reply():
+    # แอดมินกดปุ่มส่งจากหน้าเว็บ
+    data = request.json
+    recipient_id = data.get("sender_id")
+    text = data.get("message")
+    
+    # 1. ส่งเข้า FB
+    send_fb_message(recipient_id, text)
+    
+    # 2. บันทึกลง DB ว่าแอดมินตอบแล้ว
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", 
+                     (recipient_id, text, 'admin'))
+    
+    return jsonify({"status": "sent"})
+
+# ================== WEBHOOK (รับข้อความ FB) ==================
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
         if request.args.get("hub.verify_token") == FB_VERIFY_TOKEN:
             return request.args.get("hub.challenge")
-        return "Verification failed", 403
+        return "Failed", 403
 
     if request.method == "POST":
         data = request.json
@@ -156,35 +133,21 @@ def webhook():
             for event in entry.get("messaging", []):
                 if "message" in event and "text" in event["message"]:
                     user_msg = event["message"]["text"]
-                    sender_id = event["sender"]["id"] # ดึง ID ลูกค้ามาใช้เป็นกุญแจความจำ
+                    sender_id = event["sender"]["id"]
                     
-                    # 1. ให้ AI คิด (ส่ง sender_id ไปด้วย)
-                    full_response = ask_gemini(user_msg, sender_id)
+                    # 1. ให้ AI คิดคำตอบรอไว้ (Suggestion)
+                    ai_reply = ask_gemini(user_msg)
                     
-                    # 2. แยกส่วน
-                    parts = full_response.split("###")
-                    
-                    if len(parts) >= 2:
-                        analysis_part = parts[0].strip()
-                        reply_part = parts[1].strip()
-                    else:
-                        analysis_part = "AI ไม่ได้วิเคราะห์แยกส่วนมาให้"
-                        reply_part = full_response.strip()
+                    # 2. บันทึกลง DB (เพื่อให้หน้าเว็บเห็น)
+                    with sqlite3.connect(DB_NAME) as conn:
+                        # บันทึกข้อความลูกค้า
+                        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", 
+                                     (sender_id, user_msg, 'user'))
+                        # บันทึกคำแนะนำ AI (ซ่อนไว้ก่อน รอแอดมินกดส่ง)
+                        conn.execute("INSERT INTO chats (sender_id, message, sender_type) VALUES (?, ?, ?)", 
+                                     (sender_id, ai_reply, 'ai_suggestion'))
 
-                    # 3. ส่งเข้า Telegram (แยก 2 ข้อความ)
-                    send_telegram(
-                        f"🔔 ลูกค้า: {user_msg}\n"
-                        f"--------------------\n"
-                        f"🧠 AI วิเคราะห์:\n{analysis_part}"
-                    )
-                    send_telegram(reply_part)
-                    
         return "OK", 200
-
-def send_telegram(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID: return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
